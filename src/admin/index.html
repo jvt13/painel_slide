@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Painel Admin</title>
+    <style>
+        body {
+            font-family: Arial;
+            padding: 20px;
+        }
+
+        li {
+            margin: 5px 0;
+        }
+
+        button {
+            margin-left: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>Upload de Mídia</h2>
+
+    <form action="/media/upload" method="POST" enctype="multipart/form-data">
+        <input type="file" name="media" required />
+        <button type="submit">Enviar</button>
+    </form>
+
+    <hr />
+
+    <h2>Ordem da Playlist</h2>
+    <ul id="playlist"></ul>
+
+    <script>
+        async function loadPlaylist() {
+            const res = await fetch('/media/playlist')
+            const data = await res.json()
+            const list = document.getElementById('playlist')
+            list.innerHTML = ''
+
+            data.forEach((item, index) => {
+                const li = document.createElement('li')
+                li.innerHTML = `
+      ${item.src}
+      <button onclick="move(${index}, -1)">↑</button>
+      <button onclick="move(${index}, 1)">↓</button>
+      <button onclick="removeItem(${index})">🗑️</button>
+    `
+                list.appendChild(li)
+            })
+        }
+
+        async function move(index, dir) {
+            await fetch('/media/reorder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index, dir })
+            })
+            loadPlaylist()
+        }
+
+        loadPlaylist()
+    </script>
+    <script>
+        async function removeItem(index) {
+            if (!confirm('Deseja excluir este arquivo?')) return
+
+            await fetch('/media/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index })
+            })
+
+            loadPlaylist()
+        }
+    </script>
+
+
+</body>
+
+</html>
