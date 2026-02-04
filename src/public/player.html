@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/public/player.css">
     <title>Player</title>
     <style>
         html,
@@ -37,16 +38,32 @@
 </head>
 
 <body>
-    <div id="container"></div>
-    <script src="/socket.io/socket.io.js"></script>
+  <div id="player">
 
-    <script src="/js/player.js"></script>
-    <script>
+    <!-- LOGO -->
+    <div id="logo">
+      <img src="/assets/logo.png" alt="Logo" />
+    </div>
+
+    <!-- CONTEÚDO -->
+    <div id="container"></div>
+
+    <!-- RODAPÉ -->
+    <div id="footer">
+      <div id="clock"></div>
+      <div id="footer-text">Bem-vindo à nossa empresa</div>
+    </div>
+
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/player.js"></script>
+      <script>
         document.addEventListener('click', () => {
             document.documentElement.requestFullscreen()
         })
     </script>
-
 </body>
+
 
 </html>

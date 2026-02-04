@@ -3,6 +3,8 @@
 
 <head>
     <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/admin/admin.css">
+
     <title>Painel Admin</title>
     <style>
         body {
@@ -22,12 +24,34 @@
 
 <body>
 
+<div class="card">
     <h2>Upload de Mídia</h2>
 
     <form action="/media/upload" method="POST" enctype="multipart/form-data">
-        <input type="file" name="media" required />
+        <div>
+            <label>Arquivo:</label><br />
+            <input type="file" name="media" accept="image/*,video/*,.pdf" required />
+        </div>
+
+        <div>
+            <label>Nome da mídia:</label><br />
+            <input type="text" name="name" placeholder="Ex: Promoção de Natal" required />
+        </div>
+
+        <div>
+            <label>Duração (segundos):</label><br />
+            <input type="number" name="duration" min="1" value="5" required />
+        </div>
+
         <button type="submit">Enviar</button>
     </form>
+</div>
+
+<div class="card">
+  <h2>Playlist</h2>
+  <ul id="playlist"></ul>
+</div>
+
 
     <hr />
 
@@ -42,14 +66,31 @@
             list.innerHTML = ''
 
             data.forEach((item, index) => {
-                const li = document.createElement('li')
-                li.innerHTML = `
-      ${item.src}
-      <button onclick="move(${index}, -1)">↑</button>
-      <button onclick="move(${index}, 1)">↓</button>
-      <button onclick="removeItem(${index})">🗑️</button>
-    `
-                list.appendChild(li)
+            const li = document.createElement('li')
+            li.style.marginBottom = '15px'
+
+            li.innerHTML = `
+            <div class="playlist-item">
+                ${item.type === 'image'
+                ? `<img src="${item.src}">`
+                : `<div>🎥 ${item.type}</div>`
+                }
+
+                <div>
+                <strong>${item.name}</strong><br>
+                <small>${item.duration / 1000}s</small>
+                </div>
+
+                <div class="actions">
+                <button onclick="move(${index}, -1)">↑</button>
+                <button onclick="move(${index}, 1)">↓</button>
+                <button onclick="removeItem(${index})">🗑️</button>
+                </div>
+            </div>
+            `
+
+
+            list.appendChild(li)
             })
         }
 

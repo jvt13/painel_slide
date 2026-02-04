@@ -39,6 +39,7 @@ router.post('/upload', upload.single('media'), (req, res) => {
     : []
 
   const file = req.file
+  const { name, duration } = req.body
   if (!file) return res.sendStatus(400)
 
   const type = file.mimetype.startsWith('image')
@@ -49,14 +50,19 @@ router.post('/upload', upload.single('media'), (req, res) => {
 
   playlist.push({
     type,
-    src: `/uploads/${type === 'image' ? 'images' : type === 'video' ? 'videos' : 'pdfs'}/${file.filename}`,
-    duration: 5000
+    name,
+    src: `/uploads/${
+      type === 'image' ? 'images' : type === 'video' ? 'videos' : 'pdfs'
+    }/${file.filename}`,
+    duration: Number(duration) * 1000 // segundos → ms
   })
 
   fs.writeFileSync(playlistFile, JSON.stringify(playlist, null, 2))
+
   req.app.get('io').emit('playlist:update')
   res.redirect('/admin')
 })
+
 
 // 🔹 REORDENAR
 router.post('/reorder', express.json(), (req, res) => {

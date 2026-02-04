@@ -17,7 +17,15 @@ socket.on('playlist:update', async () => {
   }
 })
 
+function updateClock() {
+  const now = new Date()
+  const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const date = now.toLocaleDateString('pt-BR')
+  document.getElementById('clock').innerText = `${date} ${time}`
+}
 
+setInterval(updateClock, 1000)
+updateClock()
 
 async function loadPlaylist() {
   const res = await fetch('/media/playlist')
