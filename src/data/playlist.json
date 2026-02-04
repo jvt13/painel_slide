@@ -6,9 +6,27 @@
     "duration": 5000
   },
   {
+    "type": "video",
+    "name": "amor",
+    "src": "/uploads/videos/1770178579708-amor.mp4",
+    "duration": 5000
+  },
+  {
     "type": "image",
     "name": "painel",
     "src": "/uploads/images/1770171629508-ChatGPT Image 11 de nov. de 2025, 22_34_05.png",
     "duration": 10000
+  },
+  {
+    "type": "image",
+    "name": "treinando",
+    "src": "/uploads/images/1770175406467-uma pessoa treinando ao ar livre ou comendo algo saudÃ¡vel.png",
+    "duration": 8000
+  },
+  {
+    "type": "image",
+    "name": "teste",
+    "src": "/uploads/images/1770178779612-WhatsApp Image 2024-11-14 at 08.56.22.jpeg",
+    "duration": 5000
   }
 ]

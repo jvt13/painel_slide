@@ -34,11 +34,21 @@ html, body {
 }
 
 #container img,
-#container video {
+#container video,
+#container iframe,
+#container embed {
   max-width: 95%;
   max-height: 90%;
   object-fit: contain;
   animation: fadeIn 0.8s ease;
+}
+
+#container iframe,
+#container embed {
+  width: 95%;
+  height: 90%;
+  border: none;
+  background: white;
 }
 
 /* RODAPÉ */

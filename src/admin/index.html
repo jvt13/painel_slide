@@ -2,124 +2,243 @@
 <html lang="pt-BR">
 
 <head>
-    <meta charset="UTF-8" />
-    <link rel="stylesheet" href="/src/admin/admin.css">
-
-    <title>Painel Admin</title>
-    <style>
-        body {
-            font-family: Arial;
-            padding: 20px;
-        }
-
-        li {
-            margin: 5px 0;
-        }
-
-        button {
-            margin-left: 5px;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/admin/admin.css">
+  <title>Painel Admin</title>
 </head>
 
 <body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <h1>Painel de Midias</h1>
+        <p>Gerencie uploads e organize a playlist do player.</p>
+      </div>
+      <div class="status" id="server-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Servidor ativo</span>
+      </div>
+    </header>
 
-<div class="card">
-    <h2>Upload de Mídia</h2>
+    <main class="grid">
+      <section class="card">
+        <h2>Upload de Midia</h2>
+        <form class="form" action="/media/upload" method="POST" enctype="multipart/form-data">
+          <label class="field">
+            <span>Arquivo</span>
+            <input type="file" id="media-file" name="media" accept="image/*,video/*,.pdf" required />
+          </label>
 
-    <form action="/media/upload" method="POST" enctype="multipart/form-data">
-        <div>
-            <label>Arquivo:</label><br />
-            <input type="file" name="media" accept="image/*,video/*,.pdf" required />
+          <label class="field">
+            <span>Nome da midia</span>
+            <input type="text" name="name" placeholder="Ex: Promocao de Natal" required />
+          </label>
+
+          <label class="field">
+            <span>Duracao (segundos)</span>
+            <input type="number" id="duration" name="duration" min="1" value="5" required />
+          </label>
+
+          <button class="btn primary" type="submit">Enviar</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Playlist</h2>
+          <button class="btn ghost" type="button" onclick="loadPlaylist()">Atualizar</button>
         </div>
+        <ul id="playlist" class="playlist"></ul>
+        <p id="empty" class="empty">Nenhum arquivo na playlist.</p>
+      </section>
+    </main>
 
-        <div>
-            <label>Nome da mídia:</label><br />
-            <input type="text" name="name" placeholder="Ex: Promoção de Natal" required />
-        </div>
+    <section class="card settings">
+      <div class="card-header">
+        <h2>Configuracoes do Player</h2>
+        <button class="btn ghost" type="button" onclick="loadSettings()">Atualizar</button>
+      </div>
+      <div class="form">
+        <label class="field">
+          <span>Cor de fundo</span>
+          <input type="color" id="bg-color" value="#ffffff" />
+        </label>
+        <button class="btn primary" type="button" onclick="saveSettings()">Salvar</button>
+      </div>
+    </section>
+  </div>
 
-        <div>
-            <label>Duração (segundos):</label><br />
-            <input type="number" name="duration" min="1" value="5" required />
-        </div>
+  <script>
+    async function loadPlaylist() {
+      const res = await fetch('/media/playlist')
+      const data = await res.json()
+      const list = document.getElementById('playlist')
+      const empty = document.getElementById('empty')
+      list.innerHTML = ''
 
-        <button type="submit">Enviar</button>
-    </form>
-</div>
+      if (!data.length) {
+        empty.style.display = 'block'
+        return
+      }
 
-<div class="card">
-  <h2>Playlist</h2>
-  <ul id="playlist"></ul>
-</div>
+      empty.style.display = 'none'
 
+      data.forEach((item, index) => {
+        const li = document.createElement('li')
+        li.className = 'playlist-item'
 
-    <hr />
-
-    <h2>Ordem da Playlist</h2>
-    <ul id="playlist"></ul>
-
-    <script>
-        async function loadPlaylist() {
-            const res = await fetch('/media/playlist')
-            const data = await res.json()
-            const list = document.getElementById('playlist')
-            list.innerHTML = ''
-
-            data.forEach((item, index) => {
-            const li = document.createElement('li')
-            li.style.marginBottom = '15px'
-
-            li.innerHTML = `
-            <div class="playlist-item">
-                ${item.type === 'image'
-                ? `<img src="${item.src}">`
-                : `<div>🎥 ${item.type}</div>`
-                }
-
-                <div>
-                <strong>${item.name}</strong><br>
-                <small>${item.duration / 1000}s</small>
-                </div>
-
-                <div class="actions">
-                <button onclick="move(${index}, -1)">↑</button>
-                <button onclick="move(${index}, 1)">↓</button>
-                <button onclick="removeItem(${index})">🗑️</button>
-                </div>
+        li.innerHTML = `
+          <div class="media">
+            ${item.type === 'image'
+              ? `<img src="${item.src}" alt="${item.name}">`
+              : `<div class="type ${item.type}">${item.type.toUpperCase()}</div>`
+            }
+          </div>
+          <div class="info">
+            <div class="title">${item.name}</div>
+            <div class="meta">
+              <span>${item.duration / 1000}s</span>
+              <span class="dot">�</span>
+              <span class="kind">${item.type}</span>
             </div>
-            `
+          </div>
+          <div class="actions">
+            <button class="btn ghost" onclick="move(${index}, -1)">?</button>
+            <button class="btn ghost" onclick="move(${index}, 1)">?</button>
+            <button class="btn danger" onclick="removeItem(${index})">Excluir</button>
+          </div>
+        `
 
+        list.appendChild(li)
+      })
+    }
 
-            list.appendChild(li)
-            })
+    async function move(index, dir) {
+      await fetch('/media/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index, dir })
+      })
+      loadPlaylist()
+    }
+
+    async function removeItem(index) {
+      if (!confirm('Deseja excluir este arquivo?')) return
+
+      await fetch('/media/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index })
+      })
+
+      loadPlaylist()
+    }
+
+    loadPlaylist()
+
+    async function checkServerStatus() {
+      const dot = document.getElementById('status-dot')
+      const text = document.getElementById('status-text')
+
+      try {
+        const res = await fetch('/media/playlist', { cache: 'no-store' })
+        if (!res.ok) throw new Error('offline')
+        dot.classList.remove('offline')
+        text.textContent = 'Servidor ativo'
+      } catch (err) {
+        dot.classList.add('offline')
+        text.textContent = 'Servidor offline'
+      }
+    }
+
+    window.addEventListener('online', checkServerStatus)
+    window.addEventListener('offline', checkServerStatus)
+    setInterval(checkServerStatus, 5000)
+    checkServerStatus()
+
+    async function loadSettings() {
+      try {
+        const res = await fetch('/media/settings', { cache: 'no-store' })
+        const data = await res.json()
+        const input = document.getElementById('bg-color')
+        if (data && data.background) {
+          input.value = data.background
+        }
+      } catch (err) {
+        console.warn('Nao foi possivel carregar as configuracoes.')
+      }
+    }
+
+    async function saveSettings() {
+      const input = document.getElementById('bg-color')
+      const background = input.value
+
+      await fetch('/media/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ background })
+      })
+    }
+
+    loadSettings()
+
+    function setDuration(seconds, lock) {
+      const input = document.getElementById('duration')
+      if (!input) return
+      input.value = Math.max(1, Math.round(seconds))
+      input.disabled = !!lock
+    }
+
+    function unlockDuration() {
+      const input = document.getElementById('duration')
+      if (!input) return
+      input.disabled = false
+    }
+
+    function handleMediaChange(event) {
+      const file = event.target.files && event.target.files[0]
+      if (!file) {
+        unlockDuration()
+        return
+      }
+
+      if (file.type.startsWith('image')) {
+        setDuration(5, false)
+        return
+      }
+
+      if (file.type === 'application/pdf') {
+        setDuration(5, false)
+        return
+      }
+
+      if (file.type.startsWith('video')) {
+        const url = URL.createObjectURL(file)
+        const video = document.createElement('video')
+        video.preload = 'metadata'
+
+        video.onloadedmetadata = () => {
+          URL.revokeObjectURL(url)
+          if (video.duration && isFinite(video.duration)) {
+            setDuration(video.duration, true)
+          }
         }
 
-        async function move(index, dir) {
-            await fetch('/media/reorder', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index, dir })
-            })
-            loadPlaylist()
+        video.onerror = () => {
+          URL.revokeObjectURL(url)
+          unlockDuration()
         }
 
-        loadPlaylist()
-    </script>
-    <script>
-        async function removeItem(index) {
-            if (!confirm('Deseja excluir este arquivo?')) return
+        video.src = url
+      }
+    }
 
-            await fetch('/media/delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index })
-            })
-
-            loadPlaylist()
-        }
-    </script>
-
-
+    const mediaInput = document.getElementById('media-file')
+    if (mediaInput) {
+      mediaInput.addEventListener('change', handleMediaChange)
+    }
+  </script>
 </body>
 
 </html>

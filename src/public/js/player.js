@@ -2,7 +2,9 @@ const socket = io()
 
 let playlist = []
 let currentIndex = 0
+let slideTimer = null
 const container = document.getElementById('container')
+const playerRoot = document.getElementById('player')
 
 socket.on('playlist:update', async () => {
   console.log('Playlist atualizada')
@@ -14,6 +16,12 @@ socket.on('playlist:update', async () => {
   if (playlist.length !== oldLength) {
     currentIndex = 0
     showItem(playlist[currentIndex])
+  }
+})
+
+socket.on('settings:update', (settings) => {
+  if (settings && settings.background) {
+    applyBackground(settings.background)
   }
 })
 
@@ -34,11 +42,35 @@ async function loadPlaylist() {
   console.log('Playlist carregada:', playlist)
 }
 
+async function loadSettings() {
+  try {
+    const res = await fetch('/media/settings', { cache: 'no-store' })
+    const settings = await res.json()
+    if (settings && settings.background) {
+      applyBackground(settings.background)
+    }
+  } catch (err) {
+    // ignore
+  }
+}
+
+function applyBackground(color) {
+  if (playerRoot) {
+    playerRoot.style.backgroundColor = color
+  }
+  document.body.style.backgroundColor = color
+}
+
 function clearContainer() {
   container.innerHTML = ''
 }
 
 function showItem(item) {
+  if (slideTimer) {
+    clearTimeout(slideTimer)
+    slideTimer = null
+  }
+
   if (!item || !item.src) {
     nextItem()
     return
@@ -53,7 +85,7 @@ function showItem(item) {
     img.onerror = () => nextItem()
     container.appendChild(img)
 
-    setTimeout(nextItem, item.duration || 5000)
+    slideTimer = setTimeout(nextItem, item.duration || 5000)
   }
 
   else if (item.type === 'video') {
@@ -69,18 +101,30 @@ function showItem(item) {
     container.appendChild(video)
   }
 
+  else if (item.type === 'pdf') {
+    const frame = document.createElement('iframe')
+    frame.src = item.src
+    frame.setAttribute('title', item.name || 'PDF')
+    frame.onerror = () => nextItem()
+
+    container.appendChild(frame)
+    slideTimer = setTimeout(nextItem, item.duration || 5000)
+  }
+
   else {
     // PDF ou qualquer outro tipo (ignora por enquanto)
-    setTimeout(nextItem, item.duration || 3000)
+    slideTimer = setTimeout(nextItem, item.duration || 3000)
   }
 }
 
 function nextItem() {
+  if (!playlist.length) return
   currentIndex = (currentIndex + 1) % playlist.length
   showItem(playlist[currentIndex])
 }
 
 async function startPlayer() {
+  await loadSettings()
   await loadPlaylist()
 
   if (!playlist.length) {

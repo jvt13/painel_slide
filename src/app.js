@@ -14,6 +14,12 @@ app.use(
   express.static(path.resolve(__dirname, 'public'))
 )
 
+// admin static (css/js)
+app.use(
+  '/admin',
+  express.static(path.resolve(__dirname, 'admin'))
+)
+
 // 🔥 SERVIR UPLOADS
 app.use(
   '/uploads',

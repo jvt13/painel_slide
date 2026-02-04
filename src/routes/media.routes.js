@@ -7,6 +7,7 @@ const multer = require('multer')
 // caminhos
 const uploadsPath = path.resolve(__dirname, '..', 'uploads')
 const playlistFile = path.resolve(__dirname, '..', 'data', 'playlist.json')
+const settingsFile = path.resolve(__dirname, '..', 'data', 'settings.json')
 
 // storage do multer
 const storage = multer.diskStorage({
@@ -30,6 +31,28 @@ router.get('/playlist', (req, res) => {
     : []
 
   res.json(playlist)
+})
+
+// SETTINGS
+router.get('/settings', (req, res) => {
+  const settings = fs.existsSync(settingsFile)
+    ? JSON.parse(fs.readFileSync(settingsFile))
+    : { background: '#ffffff' }
+
+  res.json(settings)
+})
+
+router.post('/settings', express.json(), (req, res) => {
+  const { background } = req.body || {}
+  const value = typeof background === 'string' ? background.trim() : ''
+
+  const settings = {
+    background: value || '#ffffff'
+  }
+
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2))
+  req.app.get('io').emit('settings:update', settings)
+  res.json(settings)
 })
 
 // 🔹 UPLOAD
