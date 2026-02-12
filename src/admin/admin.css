@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #0e161b;
   --panel: #131f26;
   --panel-2: #182730;
@@ -27,6 +27,10 @@ body {
   padding: 28px 20px 60px;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
@@ -44,6 +48,27 @@ body {
 .header p {
   margin: 0;
   color: var(--muted);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-switch {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.group-switch select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0c161b;
+  color: var(--text);
 }
 
 .status {
@@ -102,6 +127,19 @@ body {
   gap: 12px;
 }
 
+.form-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.helper {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .field {
   display: grid;
   gap: 6px;
@@ -110,6 +148,15 @@ body {
 }
 
 .field input {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0c161b;
+  color: var(--text);
+  outline: none;
+}
+
+.field select {
   padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -128,6 +175,11 @@ body {
 }
 
 .field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 194, 255, 0.18);
+}
+
+.field select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(0, 194, 255, 0.18);
 }
@@ -244,15 +296,6 @@ body {
   flex-wrap: wrap;
 }
 
-.meta span {
-  display: inline-flex;
-  align-items: center;
-}
-
-.meta .dot {
-  opacity: 0.7;
-}
-
 .meta .kind {
   text-transform: uppercase;
   letter-spacing: 0.4px;
@@ -274,10 +317,51 @@ body {
   margin-top: 18px;
 }
 
+.preview-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.preview-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.default-preview {
+  width: 220px;
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.users-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.user-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(7, 14, 18, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 @media (max-width: 720px) {
   .header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .playlist-item {

@@ -1,13 +1,19 @@
 const express = require('express')
 const path = require('path')
 require('dotenv').config()
+const http = require('http')
+const { Server } = require('socket.io')
 
+const { getDb } = require('./db')
+const authRoutes = require('./routes/auth.routes')
+const { attachUser } = require('./middlewares/auth.middleware')
 const mediaRoutes = require('./routes/media.routes')
 
 const app = express()
 
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+app.use(attachUser)
 
 // 🔥 SERVIR ARQUIVOS ESTÁTICOS DO FRONT
 app.use(
@@ -27,6 +33,7 @@ app.use(
 )
 
 // rotas
+app.use('/auth', authRoutes)
 app.use('/media', mediaRoutes)
 
 // admin
@@ -40,8 +47,6 @@ app.get('/player', (req, res) => {
 })
 
 const PORT = process.env.PORT || 3000
-const http = require('http')
-const { Server } = require('socket.io')
 
 const server = http.createServer(app)
 const io = new Server(server)
@@ -53,7 +58,20 @@ io.on('connection', (socket) => {
   console.log('Player conectado:', socket.id)
 })
 
-server.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`)
+app.use((err, req, res, next) => {
+  console.error(err)
+  const status = err.status || 500
+  res.status(status).json({ error: err.message || 'Erro interno' })
 })
+
+getDb()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`Servidor rodando na porta ${PORT}`)
+    })
+  })
+  .catch((error) => {
+    console.error('Falha ao inicializar banco SQLite', error)
+    process.exit(1)
+  })
 

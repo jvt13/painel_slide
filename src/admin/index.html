@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 
 <head>
@@ -10,69 +10,244 @@
 
 <body>
   <div class="page">
-    <header class="header">
-      <div>
-        <h1>Painel de Midias</h1>
-        <p>Gerencie uploads e organize a playlist do player.</p>
-      </div>
-      <div class="status" id="server-status">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Servidor ativo</span>
-      </div>
-    </header>
-
-    <main class="grid">
-      <section class="card">
-        <h2>Upload de Midia</h2>
-        <form class="form" action="/media/upload" method="POST" enctype="multipart/form-data">
-          <label class="field">
-            <span>Arquivo</span>
-            <input type="file" id="media-file" name="media" accept="image/*,video/*,.pdf" required />
-          </label>
-
-          <label class="field">
-            <span>Nome da midia</span>
-            <input type="text" name="name" placeholder="Ex: Promocao de Natal" required />
-          </label>
-
-          <label class="field">
-            <span>Duracao (segundos)</span>
-            <input type="number" id="duration" name="duration" min="1" value="5" required />
-          </label>
-
-          <button class="btn primary" type="submit">Enviar</button>
-        </form>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>Playlist</h2>
-          <button class="btn ghost" type="button" onclick="loadPlaylist()">Atualizar</button>
-        </div>
-        <ul id="playlist" class="playlist"></ul>
-        <p id="empty" class="empty">Nenhum arquivo na playlist.</p>
-      </section>
-    </main>
-
-    <section class="card settings">
-      <div class="card-header">
-        <h2>Configuracoes do Player</h2>
-        <button class="btn ghost" type="button" onclick="loadSettings()">Atualizar</button>
-      </div>
-      <div class="form">
+    <section class="card" id="login-card">
+      <h2>Acesso ao Painel</h2>
+      <form class="form" id="login-form">
         <label class="field">
-          <span>Cor de fundo</span>
-          <input type="color" id="bg-color" value="#ffffff" />
+          <span>Usuario</span>
+          <input type="text" id="login-username" required />
         </label>
-        <button class="btn primary" type="button" onclick="saveSettings()">Salvar</button>
-      </div>
+        <label class="field">
+          <span>Senha</span>
+          <input type="password" id="login-password" required />
+        </label>
+        <button class="btn primary" type="submit">Entrar</button>
+        <p class="helper">Usuario master padrao: <strong>master</strong> / senha: <strong>admin123</strong></p>
+      </form>
     </section>
+
+    <div id="app-shell" class="hidden">
+      <header class="header">
+        <div>
+          <h1>Painel de Midias</h1>
+          <p id="user-label">Gerencie uploads e organize a playlist do player.</p>
+        </div>
+        <div class="header-actions">
+          <label class="group-switch hidden" id="group-switch-wrap">
+            <span>Grupo</span>
+            <select id="group-select"></select>
+          </label>
+          <div class="status" id="server-status">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status-text">Servidor ativo</span>
+          </div>
+          <button class="btn ghost" type="button" id="logout-btn">Sair</button>
+        </div>
+      </header>
+
+      <main class="grid">
+        <section class="card">
+          <h2>Upload de Midia</h2>
+          <form class="form" action="/media/upload" method="POST" enctype="multipart/form-data" id="upload-form">
+            <input type="hidden" name="groupId" id="upload-group-id" />
+            <label class="field">
+              <span>Arquivo</span>
+              <input type="file" id="media-file" name="media" accept="image/*,video/*,.pdf" required />
+            </label>
+
+            <label class="field">
+              <span>Nome da midia</span>
+              <input type="text" name="name" placeholder="Ex: Promocao de Natal" required />
+            </label>
+
+            <label class="field">
+              <span>Duracao (segundos)</span>
+              <input type="number" id="duration" name="duration" min="1" value="5" required />
+            </label>
+
+            <button class="btn primary" type="submit">Enviar</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h2>Playlist</h2>
+            <button class="btn ghost" type="button" onclick="loadPlaylist()">Atualizar</button>
+          </div>
+          <ul id="playlist" class="playlist"></ul>
+          <p id="empty" class="empty">Nenhum arquivo na playlist.</p>
+        </section>
+      </main>
+
+      <section class="card settings">
+        <div class="card-header">
+          <h2>Configuracoes do Grupo</h2>
+          <button class="btn ghost" type="button" onclick="loadSettings()">Atualizar</button>
+        </div>
+        <div class="form">
+          <label class="field">
+            <span>Cor de fundo</span>
+            <input type="color" id="bg-color" value="#ffffff" />
+          </label>
+          <button class="btn primary" type="button" onclick="saveSettings()">Salvar cor</button>
+          <form class="form-inline" id="default-image-form">
+            <input type="hidden" name="groupId" id="default-image-group-id" />
+            <input type="file" name="defaultImage" id="default-image-input" accept="image/*" required />
+            <button class="btn ghost" type="submit">Salvar imagem padrao</button>
+          </form>
+          <div class="preview-wrap">
+            <span class="preview-label">Imagem padrao atual</span>
+            <img id="default-image-preview" class="default-preview hidden" alt="Imagem padrao" />
+          </div>
+        </div>
+      </section>
+
+      <section class="card settings hidden" id="users-card">
+        <div class="card-header">
+          <h2>Gestao de Usuarios</h2>
+          <button class="btn ghost" type="button" onclick="loadUsers()">Atualizar</button>
+        </div>
+        <form class="form" id="create-user-form">
+          <label class="field">
+            <span>Usuario</span>
+            <input type="text" id="new-username" required />
+          </label>
+          <label class="field">
+            <span>Senha</span>
+            <input type="password" id="new-password" required />
+          </label>
+          <label class="field">
+            <span>Grupo</span>
+            <select id="new-user-group"></select>
+          </label>
+          <button class="btn primary" type="submit">Criar usuario do grupo</button>
+          <p class="helper" id="create-user-msg"></p>
+        </form>
+        <ul id="users-list" class="users-list"></ul>
+      </section>
+
+      <section class="card settings hidden" id="groups-order-card">
+        <div class="card-header">
+          <h2>Ordem dos Grupos no Player</h2>
+          <button class="btn ghost" type="button" onclick="loadGroupOrder()">Atualizar</button>
+        </div>
+        <ul id="groups-order-list" class="users-list"></ul>
+        <button class="btn primary" type="button" onclick="saveGroupOrder()">Salvar ordem</button>
+      </section>
+    </div>
   </div>
 
   <script>
+    let currentUser = null
+    let groups = []
+    let groupOrder = []
+    let selectedGroupId = null
+
+    const loginCard = document.getElementById('login-card')
+    const appShell = document.getElementById('app-shell')
+    const groupSelect = document.getElementById('group-select')
+    const groupSwitchWrap = document.getElementById('group-switch-wrap')
+    const usersCard = document.getElementById('users-card')
+    const groupsOrderCard = document.getElementById('groups-order-card')
+    const newUserGroup = document.getElementById('new-user-group')
+
+    function getGroupQuery() {
+      return selectedGroupId ? `?groupId=${selectedGroupId}` : ''
+    }
+
+    function syncGroupHiddenFields() {
+      const uploadGroup = document.getElementById('upload-group-id')
+      const defaultGroup = document.getElementById('default-image-group-id')
+      if (uploadGroup) uploadGroup.value = selectedGroupId || ''
+      if (defaultGroup) defaultGroup.value = selectedGroupId || ''
+    }
+
+    function renderAuth() {
+      const userLabel = document.getElementById('user-label')
+      if (!currentUser) {
+        loginCard.classList.remove('hidden')
+        appShell.classList.add('hidden')
+        return
+      }
+
+      userLabel.textContent = `Usuario: ${currentUser.username} (${currentUser.role === 'master' ? 'master' : currentUser.groupName || 'grupo'})`
+      loginCard.classList.add('hidden')
+      appShell.classList.remove('hidden')
+
+      if (currentUser.role === 'master') {
+        groupSwitchWrap.classList.remove('hidden')
+        usersCard.classList.remove('hidden')
+        groupsOrderCard.classList.remove('hidden')
+        groupSelect.innerHTML = ''
+        newUserGroup.innerHTML = ''
+        groups.forEach((group) => {
+          const option = document.createElement('option')
+          option.value = String(group.id)
+          option.textContent = group.name
+          groupSelect.appendChild(option)
+
+          const userOption = document.createElement('option')
+          userOption.value = String(group.id)
+          userOption.textContent = group.name
+          newUserGroup.appendChild(userOption)
+        })
+        groupSelect.value = String(selectedGroupId)
+      } else {
+        groupSwitchWrap.classList.add('hidden')
+        usersCard.classList.add('hidden')
+        groupsOrderCard.classList.add('hidden')
+      }
+
+      syncGroupHiddenFields()
+    }
+
+    async function requestJson(url, options = {}) {
+      const res = await fetch(url, {
+        credentials: 'same-origin',
+        ...options
+      })
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || 'Falha na requisicao')
+      }
+      return res.json()
+    }
+
+    async function bootstrap() {
+      try {
+        const me = await requestJson('/auth/me')
+        if (!me.authenticated) {
+          currentUser = null
+          renderAuth()
+          return
+        }
+
+        currentUser = me.user
+        groups = me.groups || []
+        selectedGroupId = currentUser.role === 'master'
+          ? (groups[0] ? groups[0].id : null)
+          : currentUser.groupId
+
+        renderAuth()
+        await loadAllData()
+      } catch (error) {
+        currentUser = null
+        renderAuth()
+      }
+    }
+
+    async function loadAllData() {
+      syncGroupHiddenFields()
+      await Promise.all([loadPlaylist(), loadSettings()])
+      if (currentUser && currentUser.role === 'master') {
+        await loadUsers()
+        await loadGroupOrder()
+      }
+    }
+
     async function loadPlaylist() {
-      const res = await fetch('/media/playlist')
-      const data = await res.json()
+      if (!selectedGroupId) return
+      const data = await requestJson(`/media/playlist${getGroupQuery()}`)
       const list = document.getElementById('playlist')
       const empty = document.getElementById('empty')
       list.innerHTML = ''
@@ -99,13 +274,13 @@
             <div class="title">${item.name}</div>
             <div class="meta">
               <span>${item.duration / 1000}s</span>
-              <span class="dot">�</span>
+              <span class="dot">•</span>
               <span class="kind">${item.type}</span>
             </div>
           </div>
           <div class="actions">
-            <button class="btn ghost" onclick="move(${index}, -1)">?</button>
-            <button class="btn ghost" onclick="move(${index}, 1)">?</button>
+            <button class="btn ghost" onclick="move(${index}, -1)">↑</button>
+            <button class="btn ghost" onclick="move(${index}, 1)">↓</button>
             <button class="btn danger" onclick="removeItem(${index})">Excluir</button>
           </div>
         `
@@ -115,73 +290,133 @@
     }
 
     async function move(index, dir) {
-      await fetch('/media/reorder', {
+      if (!selectedGroupId) return
+      await requestJson('/media/reorder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ index, dir })
+        body: JSON.stringify({ index, dir, groupId: selectedGroupId })
       })
-      loadPlaylist()
+      await loadPlaylist()
     }
 
     async function removeItem(index) {
       if (!confirm('Deseja excluir este arquivo?')) return
-
-      await fetch('/media/delete', {
+      await requestJson('/media/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ index })
+        body: JSON.stringify({ index, groupId: selectedGroupId })
       })
-
-      loadPlaylist()
+      await loadPlaylist()
     }
-
-    loadPlaylist()
-
-    async function checkServerStatus() {
-      const dot = document.getElementById('status-dot')
-      const text = document.getElementById('status-text')
-
-      try {
-        const res = await fetch('/media/playlist', { cache: 'no-store' })
-        if (!res.ok) throw new Error('offline')
-        dot.classList.remove('offline')
-        text.textContent = 'Servidor ativo'
-      } catch (err) {
-        dot.classList.add('offline')
-        text.textContent = 'Servidor offline'
-      }
-    }
-
-    window.addEventListener('online', checkServerStatus)
-    window.addEventListener('offline', checkServerStatus)
-    setInterval(checkServerStatus, 5000)
-    checkServerStatus()
 
     async function loadSettings() {
-      try {
-        const res = await fetch('/media/settings', { cache: 'no-store' })
-        const data = await res.json()
-        const input = document.getElementById('bg-color')
-        if (data && data.background) {
-          input.value = data.background
-        }
-      } catch (err) {
-        console.warn('Nao foi possivel carregar as configuracoes.')
+      if (!selectedGroupId) return
+      const settings = await requestJson(`/media/settings${getGroupQuery()}`)
+      document.getElementById('bg-color').value = settings.background || '#ffffff'
+
+      const preview = document.getElementById('default-image-preview')
+      if (settings.defaultImage) {
+        preview.src = settings.defaultImage
+        preview.classList.remove('hidden')
+      } else {
+        preview.src = ''
+        preview.classList.add('hidden')
       }
     }
 
     async function saveSettings() {
-      const input = document.getElementById('bg-color')
-      const background = input.value
-
-      await fetch('/media/settings', {
+      if (!selectedGroupId) return
+      const background = document.getElementById('bg-color').value
+      await requestJson('/media/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ background })
+        body: JSON.stringify({ background, groupId: selectedGroupId })
       })
     }
 
-    loadSettings()
+    async function loadUsers() {
+      if (!currentUser || currentUser.role !== 'master') return
+      const users = await requestJson('/auth/users')
+      const list = document.getElementById('users-list')
+      list.innerHTML = ''
+
+      users
+        .filter((item) => item.role === 'group_user')
+        .forEach((item) => {
+          const li = document.createElement('li')
+          li.className = 'user-item'
+          li.innerHTML = `
+            <strong>${item.username}</strong>
+            <span>${item.groupName || 'Sem grupo'}</span>
+            <span>${Number(item.active) === 1 ? 'Ativo' : 'Inativo'}</span>
+          `
+          list.appendChild(li)
+        })
+    }
+
+    function renderGroupOrder() {
+      const list = document.getElementById('groups-order-list')
+      list.innerHTML = ''
+
+      groupOrder.forEach((group, index) => {
+        const li = document.createElement('li')
+        li.className = 'user-item'
+        li.innerHTML = `
+          <strong>${group.name}</strong>
+          <span>#${index + 1}</span>
+          <div class="actions">
+            <button class="btn ghost" onclick="moveGroup(${index}, -1)">↑</button>
+            <button class="btn ghost" onclick="moveGroup(${index}, 1)">↓</button>
+          </div>
+        `
+        list.appendChild(li)
+      })
+    }
+
+    async function loadGroupOrder() {
+      if (!currentUser || currentUser.role !== 'master') return
+      const list = await requestJson('/media/groups')
+      groups = list
+      groupOrder = [...list]
+      if (!selectedGroupId && groupOrder.length) {
+        selectedGroupId = groupOrder[0].id
+      }
+      renderAuth()
+      renderGroupOrder()
+    }
+
+    function moveGroup(index, dir) {
+      const newIndex = index + dir
+      if (newIndex < 0 || newIndex >= groupOrder.length) return
+      const temp = groupOrder[index]
+      groupOrder[index] = groupOrder[newIndex]
+      groupOrder[newIndex] = temp
+      renderGroupOrder()
+    }
+
+    async function saveGroupOrder() {
+      if (!groupOrder.length) return
+      const order = groupOrder.map((group) => group.id)
+      await requestJson('/media/groups/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order })
+      })
+    }
+
+    async function checkServerStatus() {
+      const dot = document.getElementById('status-dot')
+      const text = document.getElementById('status-text')
+      try {
+        const res = await fetch('/auth/me', { cache: 'no-store' })
+        if (!res.ok) throw new Error('offline')
+        dot.classList.remove('offline')
+        text.textContent = 'Servidor ativo'
+      } catch (error) {
+        dot.classList.add('offline')
+        text.textContent = 'Servidor offline'
+      }
+    }
 
     function setDuration(seconds, lock) {
       const input = document.getElementById('duration')
@@ -203,12 +438,7 @@
         return
       }
 
-      if (file.type.startsWith('image')) {
-        setDuration(5, false)
-        return
-      }
-
-      if (file.type === 'application/pdf') {
+      if (file.type.startsWith('image') || file.type === 'application/pdf') {
         setDuration(5, false)
         return
       }
@@ -217,27 +447,119 @@
         const url = URL.createObjectURL(file)
         const video = document.createElement('video')
         video.preload = 'metadata'
-
         video.onloadedmetadata = () => {
           URL.revokeObjectURL(url)
           if (video.duration && isFinite(video.duration)) {
             setDuration(video.duration, true)
           }
         }
-
         video.onerror = () => {
           URL.revokeObjectURL(url)
           unlockDuration()
         }
-
         video.src = url
       }
     }
+
+    document.getElementById('login-form').addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const username = document.getElementById('login-username').value.trim()
+      const password = document.getElementById('login-password').value
+
+      try {
+        const payload = await requestJson('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        })
+
+        currentUser = payload.user
+        groups = payload.groups || []
+        selectedGroupId = currentUser.role === 'master'
+          ? (groups[0] ? groups[0].id : null)
+          : currentUser.groupId
+
+        renderAuth()
+        await loadAllData()
+      } catch (error) {
+        alert(error.message)
+      }
+    })
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      await requestJson('/auth/logout', { method: 'POST' })
+      currentUser = null
+      groups = []
+      selectedGroupId = null
+      renderAuth()
+    })
+
+    document.getElementById('create-user-form').addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const msg = document.getElementById('create-user-msg')
+      msg.textContent = ''
+
+      const username = document.getElementById('new-username').value.trim()
+      const password = document.getElementById('new-password').value
+      const groupId = Number(document.getElementById('new-user-group').value)
+
+      try {
+        await requestJson('/auth/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, groupId })
+        })
+        msg.textContent = 'Usuario criado com sucesso.'
+        document.getElementById('create-user-form').reset()
+        await loadUsers()
+      } catch (error) {
+        msg.textContent = error.message
+      }
+    })
+
+    groupSelect.addEventListener('change', async (event) => {
+      selectedGroupId = Number(event.target.value)
+      await loadAllData()
+    })
+
+    document.getElementById('default-image-form').addEventListener('submit', async (event) => {
+      event.preventDefault()
+      if (!selectedGroupId) return
+
+      const input = document.getElementById('default-image-input')
+      if (!input.files || !input.files[0]) return
+
+      const form = new FormData()
+      form.append('defaultImage', input.files[0])
+      form.append('groupId', String(selectedGroupId))
+
+      const res = await fetch('/media/default-image', {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin'
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        alert(payload.error || 'Falha ao salvar imagem padrao')
+        return
+      }
+
+      await loadSettings()
+      input.value = ''
+    })
 
     const mediaInput = document.getElementById('media-file')
     if (mediaInput) {
       mediaInput.addEventListener('change', handleMediaChange)
     }
+
+    window.addEventListener('online', checkServerStatus)
+    window.addEventListener('offline', checkServerStatus)
+    setInterval(checkServerStatus, 5000)
+
+    bootstrap()
+    checkServerStatus()
   </script>
 </body>
 

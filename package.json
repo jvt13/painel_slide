@@ -14,6 +14,8 @@
   "author": "José",
   "license": "ISC",
   "dependencies": {
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "multer": "^2.0.2",
