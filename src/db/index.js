@@ -50,8 +50,11 @@ async function createSchema(db) {
       src TEXT NOT NULL,
       duration INTEGER NOT NULL,
       position INTEGER NOT NULL,
+      is_locked INTEGER NOT NULL DEFAULT 0,
+      created_by_user_id INTEGER NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(group_id) REFERENCES groups(id)
+      FOREIGN KEY(group_id) REFERENCES groups(id),
+      FOREIGN KEY(created_by_user_id) REFERENCES users(id)
     );
   `)
 }
@@ -74,6 +77,19 @@ async function ensureGroupOrderColumn(db) {
         rows[index].id
       ])
     }
+  }
+}
+
+async function ensureSlideProtectionColumns(db) {
+  const columns = await db.all('PRAGMA table_info(slides)')
+  const hasIsLocked = columns.some((col) => col.name === 'is_locked')
+  const hasCreatedBy = columns.some((col) => col.name === 'created_by_user_id')
+
+  if (!hasIsLocked) {
+    await db.exec('ALTER TABLE slides ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0')
+  }
+  if (!hasCreatedBy) {
+    await db.exec('ALTER TABLE slides ADD COLUMN created_by_user_id INTEGER NULL')
   }
 }
 
@@ -190,6 +206,7 @@ async function initializeDb() {
 
   await createSchema(db)
   await ensureGroupOrderColumn(db)
+  await ensureSlideProtectionColumns(db)
   await seedGroups(db)
   await seedUsers(db)
   await migrateJsonIfNeeded(db)

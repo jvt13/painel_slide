@@ -65,6 +65,13 @@
               <input type="number" id="duration" name="duration" min="1" value="5" required />
             </label>
 
+            <label class="field hidden" id="protect-slide-wrap">
+              <span>
+                <input type="checkbox" id="protect-slide" name="protectSlide" value="1" />
+                Proteger slide (somente master pode mover/excluir)
+              </span>
+            </label>
+
             <button class="btn primary" type="submit">Enviar</button>
           </form>
         </section>
@@ -94,6 +101,7 @@
             <input type="hidden" name="groupId" id="default-image-group-id" />
             <input type="file" name="defaultImage" id="default-image-input" accept="image/*" required />
             <button class="btn ghost" type="submit">Salvar imagem padrao</button>
+            <button class="btn danger" type="button" id="remove-default-image-btn">Excluir imagem padrao</button>
           </form>
           <div class="preview-wrap">
             <span class="preview-label">Imagem padrao atual</span>
@@ -150,6 +158,8 @@
     const usersCard = document.getElementById('users-card')
     const groupsOrderCard = document.getElementById('groups-order-card')
     const newUserGroup = document.getElementById('new-user-group')
+    const protectSlideWrap = document.getElementById('protect-slide-wrap')
+    const protectSlideInput = document.getElementById('protect-slide')
 
     function getGroupQuery() {
       return selectedGroupId ? `?groupId=${selectedGroupId}` : ''
@@ -178,6 +188,7 @@
         groupSwitchWrap.classList.remove('hidden')
         usersCard.classList.remove('hidden')
         groupsOrderCard.classList.remove('hidden')
+        protectSlideWrap.classList.remove('hidden')
         groupSelect.innerHTML = ''
         newUserGroup.innerHTML = ''
         groups.forEach((group) => {
@@ -196,6 +207,8 @@
         groupSwitchWrap.classList.add('hidden')
         usersCard.classList.add('hidden')
         groupsOrderCard.classList.add('hidden')
+        protectSlideWrap.classList.add('hidden')
+        protectSlideInput.checked = false
       }
 
       syncGroupHiddenFields()
@@ -262,6 +275,8 @@
       data.forEach((item, index) => {
         const li = document.createElement('li')
         li.className = 'playlist-item'
+        const blocked = item.isLocked && currentUser.role !== 'master'
+        const lockTag = item.isLocked ? '<span class="lock-tag">Protegido</span>' : ''
 
         li.innerHTML = `
           <div class="media">
@@ -271,7 +286,7 @@
             }
           </div>
           <div class="info">
-            <div class="title">${item.name}</div>
+            <div class="title">${item.name} ${lockTag}</div>
             <div class="meta">
               <span>${item.duration / 1000}s</span>
               <span class="dot">•</span>
@@ -279,9 +294,9 @@
             </div>
           </div>
           <div class="actions">
-            <button class="btn ghost" onclick="move(${index}, -1)">↑</button>
-            <button class="btn ghost" onclick="move(${index}, 1)">↓</button>
-            <button class="btn danger" onclick="removeItem(${index})">Excluir</button>
+            <button class="btn ghost" onclick="move(${index}, -1)" ${blocked ? 'disabled' : ''}>↑</button>
+            <button class="btn ghost" onclick="move(${index}, 1)" ${blocked ? 'disabled' : ''}>↓</button>
+            <button class="btn danger" onclick="removeItem(${index})" ${blocked ? 'disabled' : ''}>Excluir</button>
           </div>
         `
 
@@ -291,22 +306,30 @@
 
     async function move(index, dir) {
       if (!selectedGroupId) return
-      await requestJson('/media/reorder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ index, dir, groupId: selectedGroupId })
-      })
-      await loadPlaylist()
+      try {
+        await requestJson('/media/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index, dir, groupId: selectedGroupId })
+        })
+        await loadPlaylist()
+      } catch (error) {
+        alert(error.message)
+      }
     }
 
     async function removeItem(index) {
       if (!confirm('Deseja excluir este arquivo?')) return
-      await requestJson('/media/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ index, groupId: selectedGroupId })
-      })
-      await loadPlaylist()
+      try {
+        await requestJson('/media/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index, groupId: selectedGroupId })
+        })
+        await loadPlaylist()
+      } catch (error) {
+        alert(error.message)
+      }
     }
 
     async function loadSettings() {
@@ -547,6 +570,22 @@
 
       await loadSettings()
       input.value = ''
+    })
+
+    document.getElementById('remove-default-image-btn').addEventListener('click', async () => {
+      if (!selectedGroupId) return
+      if (!confirm('Deseja remover a imagem padrao deste grupo?')) return
+
+      try {
+        await requestJson('/media/default-image/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ groupId: selectedGroupId })
+        })
+        await loadSettings()
+      } catch (error) {
+        alert(error.message)
+      }
     })
 
     const mediaInput = document.getElementById('media-file')

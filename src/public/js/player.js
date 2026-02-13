@@ -3,10 +3,8 @@
 const DEFAULT_EMPTY_DURATION = 5000
 
 let groups = []
-let groupIndex = 0
-let currentGroupId = null
-let playlist = []
-let currentIndex = 0
+let playQueue = []
+let queueIndex = 0
 let slideTimer = null
 
 const groupPlaylists = new Map()
@@ -16,29 +14,26 @@ const container = document.getElementById('container')
 const playerRoot = document.getElementById('player')
 
 function applyBackground(color) {
+  const resolved = color || '#ffffff'
   if (playerRoot) {
-    playerRoot.style.backgroundColor = color
+    playerRoot.style.backgroundColor = resolved
   }
-  document.body.style.backgroundColor = color
+  document.body.style.backgroundColor = resolved
 }
 
 function clearContainer() {
   container.innerHTML = ''
 }
 
-function getGroupSettings(groupId) {
-  return groupSettings.get(groupId) || { background: '#ffffff', defaultImage: null }
+function clearSlideTimer() {
+  if (slideTimer) {
+    clearTimeout(slideTimer)
+    slideTimer = null
+  }
 }
 
-function showDefaultImage(groupId) {
-  clearContainer()
-  const settings = getGroupSettings(groupId)
-  if (!settings.defaultImage) return
-
-  const img = document.createElement('img')
-  img.src = settings.defaultImage
-  img.alt = 'Imagem padrao do grupo'
-  container.appendChild(img)
+function getGroupSettings(groupId) {
+  return groupSettings.get(groupId) || { background: '#ffffff', defaultImage: null }
 }
 
 function updateClock() {
@@ -60,22 +55,8 @@ updateClock()
 
 async function loadGroups() {
   const res = await fetch('/media/groups')
-  groups = await res.json()
-  if (!Array.isArray(groups)) groups = []
-  if (!groups.length) {
-    groupIndex = 0
-    return
-  }
-
-  if (currentGroupId) {
-    const idx = groups.findIndex((group) => group.id === currentGroupId)
-    if (idx >= 0) {
-      groupIndex = idx
-      return
-    }
-  }
-
-  groupIndex = 0
+  const data = await res.json()
+  groups = Array.isArray(data) ? data : []
 }
 
 async function loadGroupData(groupId) {
@@ -95,158 +76,159 @@ async function loadGroupData(groupId) {
 }
 
 async function ensureGroupLoaded(groupId) {
-  if (!groupPlaylists.has(groupId) || !groupSettings.has(groupId)) {
+  try {
     await loadGroupData(groupId)
+  } catch (error) {
+    groupPlaylists.set(groupId, [])
+    groupSettings.set(groupId, { background: '#ffffff', defaultImage: null })
   }
 }
 
-function setCurrentGroup(groupId) {
-  currentGroupId = groupId
-  playlist = groupPlaylists.get(groupId) || []
-  currentIndex = 0
-  const settings = getGroupSettings(groupId)
-  applyBackground(settings.background)
+async function preloadAllGroups() {
+  await Promise.all(groups.map((group) => ensureGroupLoaded(group.id)))
 }
 
-function scheduleNextGroup(delayMs = 0) {
-  if (slideTimer) {
-    clearTimeout(slideTimer)
-    slideTimer = null
-  }
-  slideTimer = setTimeout(() => {
-    goToNextGroup()
-  }, delayMs)
-}
+function buildPlayQueue() {
+  const oldKey = playQueue[queueIndex]
+    ? `${playQueue[queueIndex].groupId}:${playQueue[queueIndex].slide.id}`
+    : null
 
-function showItem(item) {
-  if (slideTimer) {
-    clearTimeout(slideTimer)
-    slideTimer = null
+  const queue = []
+  for (const group of groups) {
+    const settings = getGroupSettings(group.id)
+    const slides = groupPlaylists.get(group.id) || []
+
+    if (slides.length) {
+      for (const slide of slides) {
+        queue.push({
+          groupId: group.id,
+          groupName: group.name,
+          settings,
+          slide,
+          isDefault: false
+        })
+      }
+    } else if (settings.defaultImage) {
+      queue.push({
+        groupId: group.id,
+        groupName: group.name,
+        settings,
+        slide: {
+          type: 'image',
+          name: `default-${group.name}`,
+          src: settings.defaultImage,
+          duration: DEFAULT_EMPTY_DURATION
+        },
+        isDefault: true
+      })
+    }
   }
 
-  if (!item || !item.src) {
-    nextItem()
+  playQueue = queue
+
+  if (!playQueue.length) {
+    queueIndex = 0
     return
   }
 
+  if (!oldKey) {
+    queueIndex = 0
+    return
+  }
+
+  const found = playQueue.findIndex((item) => `${item.groupId}:${item.slide.id}` === oldKey)
+  queueIndex = found >= 0 ? found : 0
+}
+
+function showCurrentEntry() {
+  if (!playQueue.length) {
+    clearContainer()
+    applyBackground('#ffffff')
+    clearSlideTimer()
+    return
+  }
+
+  const entry = playQueue[queueIndex]
+  const item = entry.slide
+  applyBackground(entry.settings.background)
+
+  clearSlideTimer()
   clearContainer()
+
+  if (!item || !item.src) {
+    nextEntry()
+    return
+  }
 
   if (item.type === 'image') {
     const img = document.createElement('img')
     img.src = item.src
-
-    img.onerror = () => nextItem()
+    img.onerror = () => nextEntry()
     container.appendChild(img)
-
-    slideTimer = setTimeout(nextItem, item.duration || 5000)
+    slideTimer = setTimeout(nextEntry, item.duration || DEFAULT_EMPTY_DURATION)
+    return
   }
 
-  else if (item.type === 'video') {
+  if (item.type === 'video') {
     const video = document.createElement('video')
     video.src = item.src
     video.autoplay = true
     video.muted = true
     video.playsInline = true
-
-    video.onerror = () => nextItem()
-    video.onended = nextItem
-
+    video.onerror = () => nextEntry()
+    video.onended = nextEntry
     container.appendChild(video)
+    return
   }
 
-  else if (item.type === 'pdf') {
+  if (item.type === 'pdf') {
     const frame = document.createElement('iframe')
     frame.src = item.src
     frame.setAttribute('title', item.name || 'PDF')
-    frame.onerror = () => nextItem()
-
+    frame.onerror = () => nextEntry()
     container.appendChild(frame)
-    slideTimer = setTimeout(nextItem, item.duration || 5000)
-  }
-
-  else {
-    slideTimer = setTimeout(nextItem, item.duration || 3000)
-  }
-}
-
-function nextItem() {
-  if (!playlist.length) {
-    showDefaultImage(currentGroupId)
-    scheduleNextGroup(DEFAULT_EMPTY_DURATION)
+    slideTimer = setTimeout(nextEntry, item.duration || DEFAULT_EMPTY_DURATION)
     return
   }
 
-  const nextIndex = currentIndex + 1
-  if (nextIndex >= playlist.length) {
-    scheduleNextGroup(0)
+  slideTimer = setTimeout(nextEntry, item.duration || DEFAULT_EMPTY_DURATION)
+}
+
+function nextEntry() {
+  if (!playQueue.length) {
+    clearContainer()
+    applyBackground('#ffffff')
     return
   }
 
-  currentIndex = nextIndex
-  showItem(playlist[currentIndex])
+  queueIndex = (queueIndex + 1) % playQueue.length
+  showCurrentEntry()
 }
 
-async function goToNextGroup() {
-  if (!groups.length) return
-  groupIndex = (groupIndex + 1) % groups.length
-  const nextGroup = groups[groupIndex]
-  await ensureGroupLoaded(nextGroup.id)
-  setCurrentGroup(nextGroup.id)
-
-  if (!playlist.length) {
-    showDefaultImage(nextGroup.id)
-    scheduleNextGroup(DEFAULT_EMPTY_DURATION)
-    return
-  }
-
-  showItem(playlist[currentIndex])
+async function refreshAll() {
+  await loadGroups()
+  await preloadAllGroups()
+  buildPlayQueue()
 }
 
-socket.on('playlist:update', async (payload = {}) => {
-  if (payload.groupId) {
-    await loadGroupData(payload.groupId)
-    if (payload.groupId === currentGroupId) {
-      setCurrentGroup(currentGroupId)
-      if (!playlist.length) {
-        showDefaultImage(currentGroupId)
-        scheduleNextGroup(DEFAULT_EMPTY_DURATION)
-      } else {
-        showItem(playlist[currentIndex])
-      }
-    }
-  }
+socket.on('playlist:update', async () => {
+  await refreshAll()
+  showCurrentEntry()
 })
 
-socket.on('settings:update', async (payload = {}) => {
-  if (payload.groupId) {
-    await loadGroupData(payload.groupId)
-    if (payload.groupId === currentGroupId) {
-      const settings = getGroupSettings(currentGroupId)
-      applyBackground(settings.background)
-      if (!playlist.length) showDefaultImage(currentGroupId)
-    }
-  }
+socket.on('settings:update', async () => {
+  await refreshAll()
+  showCurrentEntry()
 })
 
 socket.on('groups:update', async () => {
-  await loadGroups()
+  await refreshAll()
+  showCurrentEntry()
 })
 
 async function startPlayer() {
-  await loadGroups()
-  if (!groups.length) return
-
-  const initialGroup = groups[groupIndex]
-  await ensureGroupLoaded(initialGroup.id)
-  setCurrentGroup(initialGroup.id)
-
-  if (!playlist.length) {
-    showDefaultImage(initialGroup.id)
-    scheduleNextGroup(DEFAULT_EMPTY_DURATION)
-    return
-  }
-
-  showItem(playlist[currentIndex])
+  await refreshAll()
+  showCurrentEntry()
 }
 
 startPlayer()

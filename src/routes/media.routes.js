@@ -88,7 +88,8 @@ function mapSlide(row) {
     type: row.type,
     name: row.name,
     src: row.src,
-    duration: row.duration
+    duration: row.duration,
+    isLocked: Number(row.is_locked) === 1
   }
 }
 
@@ -96,7 +97,7 @@ async function loadPlaylistByGroup(groupId) {
   const db = await getDb()
   const rows = await db.all(
     `
-    SELECT id, type, name, src, duration
+    SELECT id, type, name, src, duration, is_locked
     FROM slides
     WHERE group_id = ?
     ORDER BY position, id
@@ -253,6 +254,34 @@ router.post(
   }
 )
 
+router.post('/default-image/remove', requireAuth, express.json(), async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const db = await getDb()
+    const current = await db.get(
+      'SELECT default_image FROM groups WHERE id = ?',
+      [groupId]
+    )
+
+    if (current && current.default_image) {
+      const filePath = path.resolve(
+        __dirname,
+        '..',
+        current.default_image.replace('/uploads', 'uploads')
+      )
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath)
+      }
+    }
+
+    await db.run('UPDATE groups SET default_image = NULL WHERE id = ?', [groupId])
+    await emitGroupUpdate(req, 'settings:update', groupId, { defaultImage: null })
+    return res.json({ ok: true })
+  } catch (error) {
+    return next(error)
+  }
+})
+
 router.post('/upload', requireAuth, upload.single('media'), async (req, res, next) => {
   try {
     const groupId = await resolveGroupId(req, { forWrite: true })
@@ -270,6 +299,10 @@ router.post('/upload', requireAuth, upload.single('media'), async (req, res, nex
     }/${file.filename}`
 
     const duration = Math.max(1000, Number(req.body?.duration || 5) * 1000)
+    const shouldLock =
+      req.user.role === 'master' &&
+      (req.body?.protectSlide === '1' || req.body?.protectSlide === 'true')
+
     const db = await getDb()
     const positionInfo = await db.get(
       'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ?',
@@ -278,8 +311,8 @@ router.post('/upload', requireAuth, upload.single('media'), async (req, res, nex
 
     await db.run(
       `
-      INSERT INTO slides (group_id, type, name, src, duration, position)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO slides (group_id, type, name, src, duration, position, is_locked, created_by_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         groupId,
@@ -287,7 +320,9 @@ router.post('/upload', requireAuth, upload.single('media'), async (req, res, nex
         String(req.body?.name || file.originalname),
         src,
         duration,
-        positionInfo.nextPosition
+        positionInfo.nextPosition,
+        shouldLock ? 1 : 0,
+        req.user.id || null
       ]
     )
 
@@ -310,7 +345,7 @@ router.post('/reorder', requireAuth, express.json(), async (req, res, next) => {
     const db = await getDb()
     const slides = await db.all(
       `
-      SELECT id, position
+      SELECT id, position, is_locked
       FROM slides
       WHERE group_id = ?
       ORDER BY position, id
@@ -326,6 +361,14 @@ router.post('/reorder', requireAuth, express.json(), async (req, res, next) => {
     const current = slides[index]
     const target = slides[newIndex]
     if (!current || !target) return res.sendStatus(400)
+    if (
+      req.user.role !== 'master' &&
+      (Number(current.is_locked) === 1 || Number(target.is_locked) === 1)
+    ) {
+      return res.status(403).json({
+        error: 'Slide protegido pelo master nao pode ter posicao alterada'
+      })
+    }
 
     await db.run('BEGIN TRANSACTION')
     try {
@@ -359,7 +402,7 @@ router.post('/delete', requireAuth, express.json(), async (req, res, next) => {
     const db = await getDb()
     const slides = await db.all(
       `
-      SELECT id, src
+      SELECT id, src, is_locked
       FROM slides
       WHERE group_id = ?
       ORDER BY position, id
@@ -368,6 +411,11 @@ router.post('/delete', requireAuth, express.json(), async (req, res, next) => {
     )
     const item = slides[index]
     if (!item) return res.sendStatus(400)
+    if (req.user.role !== 'master' && Number(item.is_locked) === 1) {
+      return res.status(403).json({
+        error: 'Slide protegido pelo master nao pode ser excluido'
+      })
+    }
 
     const filePath = path.resolve(
       __dirname,
