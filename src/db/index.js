@@ -45,12 +45,28 @@ async function createSchema(db) {
     CREATE TABLE IF NOT EXISTS slides (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       group_id INTEGER NOT NULL,
+      campaign_id INTEGER NULL,
       type TEXT NOT NULL CHECK(type IN ('image', 'video', 'pdf')),
       name TEXT NOT NULL,
       src TEXT NOT NULL,
       duration INTEGER NOT NULL,
       position INTEGER NOT NULL,
       is_locked INTEGER NOT NULL DEFAULT 0,
+      created_by_user_id INTEGER NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(group_id) REFERENCES groups(id),
+      FOREIGN KEY(campaign_id) REFERENCES campaigns(id),
+      FOREIGN KEY(created_by_user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      starts_at TEXT NOT NULL,
+      ends_at TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 1,
       created_by_user_id INTEGER NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(group_id) REFERENCES groups(id),
@@ -91,6 +107,32 @@ async function ensureSlideProtectionColumns(db) {
   if (!hasCreatedBy) {
     await db.exec('ALTER TABLE slides ADD COLUMN created_by_user_id INTEGER NULL')
   }
+}
+
+async function ensureSlideCampaignColumn(db) {
+  const columns = await db.all('PRAGMA table_info(slides)')
+  const hasCampaignId = columns.some((col) => col.name === 'campaign_id')
+  if (!hasCampaignId) {
+    await db.exec('ALTER TABLE slides ADD COLUMN campaign_id INTEGER NULL')
+  }
+}
+
+async function ensureCampaignsTable(db) {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      starts_at TEXT NOT NULL,
+      ends_at TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 1,
+      created_by_user_id INTEGER NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(group_id) REFERENCES groups(id),
+      FOREIGN KEY(created_by_user_id) REFERENCES users(id)
+    );
+  `)
 }
 
 async function seedGroups(db) {
@@ -207,6 +249,8 @@ async function initializeDb() {
   await createSchema(db)
   await ensureGroupOrderColumn(db)
   await ensureSlideProtectionColumns(db)
+  await ensureSlideCampaignColumn(db)
+  await ensureCampaignsTable(db)
   await seedGroups(db)
   await seedUsers(db)
   await migrateJsonIfNeeded(db)

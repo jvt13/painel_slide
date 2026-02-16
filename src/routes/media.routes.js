@@ -85,6 +85,7 @@ async function resolveGroupId(req, options = {}) {
 function mapSlide(row) {
   return {
     id: row.id,
+    campaignId: row.campaign_id || null,
     type: row.type,
     name: row.name,
     src: row.src,
@@ -97,7 +98,7 @@ async function loadPlaylistByGroup(groupId) {
   const db = await getDb()
   const rows = await db.all(
     `
-    SELECT id, type, name, src, duration, is_locked
+    SELECT id, campaign_id, type, name, src, duration, is_locked
     FROM slides
     WHERE group_id = ?
     ORDER BY position, id
@@ -105,6 +106,36 @@ async function loadPlaylistByGroup(groupId) {
     [groupId]
   )
   return rows.map(mapSlide)
+}
+
+function getCampaignStatus(startsAt, endsAt, enabled) {
+  if (!enabled) return 'inativa'
+  const now = Date.now()
+  const startMs = new Date(startsAt).getTime()
+  const endMs = new Date(endsAt).getTime()
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return 'invalida'
+  if (now < startMs) return 'agendada'
+  if (now > endMs) return 'encerrada'
+  return 'executando'
+}
+
+async function resolveActiveCampaign(db, groupId) {
+  const campaigns = await db.all(
+    `
+    SELECT id, name, starts_at, ends_at, active, priority
+    FROM campaigns
+    WHERE group_id = ?
+    ORDER BY priority ASC, starts_at ASC, id ASC
+    `,
+    [groupId]
+  )
+
+  const active = campaigns.find(
+    (campaign) =>
+      getCampaignStatus(campaign.starts_at, campaign.ends_at, Number(campaign.active) === 1) ===
+      'executando'
+  )
+  return active || null
 }
 
 async function emitGroupUpdate(req, eventName, groupId, payload = {}) {
@@ -176,6 +207,375 @@ router.get('/playlist', async (req, res, next) => {
     return next(error)
   }
 })
+
+router.get('/playlist/active', async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req)
+    const db = await getDb()
+    const activeCampaign = await resolveActiveCampaign(db, groupId)
+
+    let rows = []
+    if (activeCampaign) {
+      rows = await db.all(
+        `
+        SELECT id, campaign_id, type, name, src, duration, is_locked
+        FROM slides
+        WHERE group_id = ? AND campaign_id = ?
+        ORDER BY position, id
+        `,
+        [groupId, activeCampaign.id]
+      )
+    } else {
+      rows = await db.all(
+        `
+        SELECT id, campaign_id, type, name, src, duration, is_locked
+        FROM slides
+        WHERE group_id = ? AND campaign_id IS NULL
+        ORDER BY position, id
+        `,
+        [groupId]
+      )
+    }
+
+    return res.json({
+      campaign: activeCampaign
+        ? {
+            id: activeCampaign.id,
+            name: activeCampaign.name
+          }
+        : null,
+      slides: rows.map(mapSlide)
+    })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.get('/campaigns', requireAuth, async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const db = await getDb()
+    const campaigns = await db.all(
+      `
+      SELECT id, group_id as groupId, name, starts_at as startsAt, ends_at as endsAt, active, priority
+      FROM campaigns
+      WHERE group_id = ?
+      ORDER BY starts_at ASC, id ASC
+      `,
+      [groupId]
+    )
+
+    return res.json(
+      campaigns.map((item) => ({
+        ...item,
+        active: Number(item.active) === 1,
+        status: getCampaignStatus(item.startsAt, item.endsAt, Number(item.active) === 1)
+      }))
+    )
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post('/campaigns', requireAuth, express.json(), async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const name = String(req.body?.name || '').trim()
+    const startsAt = String(req.body?.startsAt || '').trim()
+    const endsAt = String(req.body?.endsAt || '').trim()
+    const priority = Number(req.body?.priority || 1)
+
+    if (!name || !startsAt || !endsAt) {
+      return res.status(400).json({ error: 'Nome, inicio e fim sao obrigatorios' })
+    }
+    if (new Date(startsAt).getTime() >= new Date(endsAt).getTime()) {
+      return res.status(400).json({ error: 'Data/hora de fim deve ser maior que a de inicio' })
+    }
+
+    const db = await getDb()
+    const created = await db.run(
+      `
+      INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, created_by_user_id)
+      VALUES (?, ?, ?, ?, 1, ?, ?)
+      `,
+      [groupId, name, startsAt, endsAt, Math.max(1, priority), req.user.id || null]
+    )
+
+    await emitGroupUpdate(req, 'playlist:update', groupId)
+    return res.status(201).json({ id: created.lastID })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post('/campaigns/delete', requireAuth, express.json(), async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const campaignId = Number(req.body?.campaignId)
+    if (!Number.isInteger(campaignId) || campaignId <= 0) {
+      return res.status(400).json({ error: 'Campanha invalida' })
+    }
+
+    const db = await getDb()
+    const campaign = await db.get(
+      'SELECT id FROM campaigns WHERE id = ? AND group_id = ?',
+      [campaignId, groupId]
+    )
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campanha nao encontrada' })
+    }
+
+    await db.run('UPDATE slides SET campaign_id = NULL WHERE group_id = ? AND campaign_id = ?', [
+      groupId,
+      campaignId
+    ])
+    await db.run('DELETE FROM campaigns WHERE id = ?', [campaignId])
+
+    await emitGroupUpdate(req, 'playlist:update', groupId)
+    return res.json({ ok: true })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.get('/campaigns/slides', requireAuth, async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const campaignId = Number(req.query?.campaignId)
+    if (!Number.isInteger(campaignId) || campaignId <= 0) {
+      return res.status(400).json({ error: 'Campanha invalida' })
+    }
+
+    const db = await getDb()
+    const campaign = await db.get(
+      'SELECT id FROM campaigns WHERE id = ? AND group_id = ?',
+      [campaignId, groupId]
+    )
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campanha nao encontrada' })
+    }
+
+    const rows = await db.all(
+      `
+      SELECT id, campaign_id, type, name, src, duration, is_locked
+      FROM slides
+      WHERE group_id = ? AND campaign_id = ?
+      ORDER BY position, id
+      `,
+      [groupId, campaignId]
+    )
+
+    return res.json(rows.map(mapSlide))
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post('/campaigns/slides/update', requireAuth, express.json(), async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const slideId = Number(req.body?.slideId)
+    const durationSeconds = Number(req.body?.duration)
+
+    if (!Number.isInteger(slideId) || slideId <= 0) {
+      return res.status(400).json({ error: 'Slide invalido' })
+    }
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      return res.status(400).json({ error: 'Duracao invalida' })
+    }
+
+    const db = await getDb()
+    const slide = await db.get(
+      `
+      SELECT id, campaign_id, is_locked
+      FROM slides
+      WHERE id = ? AND group_id = ?
+      `,
+      [slideId, groupId]
+    )
+    if (!slide) {
+      return res.status(404).json({ error: 'Slide nao encontrado' })
+    }
+    if (!slide.campaign_id) {
+      return res.status(400).json({ error: 'Slide sem campanha nao pode ser editado aqui' })
+    }
+    if (req.user.role !== 'master' && Number(slide.is_locked) === 1) {
+      return res.status(403).json({
+        error: 'Slide protegido pelo master nao pode ser alterado'
+      })
+    }
+
+    const duration = Math.max(1000, Math.round(durationSeconds * 1000))
+    await db.run('UPDATE slides SET duration = ? WHERE id = ?', [duration, slideId])
+
+    await emitGroupUpdate(req, 'playlist:update', groupId)
+    return res.json({ ok: true })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post('/campaigns/slides/delete', requireAuth, express.json(), async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const slideId = Number(req.body?.slideId)
+    if (!Number.isInteger(slideId) || slideId <= 0) {
+      return res.status(400).json({ error: 'Slide invalido' })
+    }
+
+    const db = await getDb()
+    const slide = await db.get(
+      `
+      SELECT id, src, campaign_id, is_locked
+      FROM slides
+      WHERE id = ? AND group_id = ?
+      `,
+      [slideId, groupId]
+    )
+    if (!slide) {
+      return res.status(404).json({ error: 'Slide nao encontrado' })
+    }
+    if (!slide.campaign_id) {
+      return res.status(400).json({ error: 'Slide sem campanha nao pode ser excluido aqui' })
+    }
+    if (req.user.role !== 'master' && Number(slide.is_locked) === 1) {
+      return res.status(403).json({
+        error: 'Slide protegido pelo master nao pode ser excluido'
+      })
+    }
+
+    const filePath = path.resolve(
+      __dirname,
+      '..',
+      slide.src.replace('/uploads', 'uploads')
+    )
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath)
+    }
+
+    await db.run('DELETE FROM slides WHERE id = ?', [slideId])
+
+    const remaining = await db.all(
+      `
+      SELECT id
+      FROM slides
+      WHERE group_id = ? AND campaign_id = ?
+      ORDER BY position, id
+      `,
+      [groupId, slide.campaign_id]
+    )
+    for (let position = 0; position < remaining.length; position += 1) {
+      await db.run('UPDATE slides SET position = ? WHERE id = ?', [
+        position,
+        remaining[position].id
+      ])
+    }
+
+    await emitGroupUpdate(req, 'playlist:update', groupId)
+    return res.json({ ok: true })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post(
+  '/campaigns/upload',
+  requireAuth,
+  upload.single('mediaFile'),
+  async (req, res, next) => {
+    try {
+      const groupId = await resolveGroupId(req, { forWrite: true })
+      const file = req.file
+      if (!file) {
+        return res.status(400).json({ error: 'Selecione uma imagem' })
+      }
+      if (!file.mimetype.startsWith('image')) {
+        return res.status(400).json({ error: 'Somente imagens sao permitidas nesta tela' })
+      }
+
+      const db = await getDb()
+      const duration = Math.max(1000, Number(req.body?.duration || 5) * 1000)
+      const incomingCampaignId = req.body?.campaignId
+        ? String(req.body.campaignId).trim()
+        : ''
+      let campaignId = null
+
+      if (incomingCampaignId && incomingCampaignId !== '__create__') {
+        const existingCampaign = await db.get(
+          'SELECT id FROM campaigns WHERE id = ? AND group_id = ?',
+          [Number(incomingCampaignId), groupId]
+        )
+        if (!existingCampaign) {
+          return res.status(400).json({ error: 'Campanha invalida para este grupo' })
+        }
+        campaignId = existingCampaign.id
+      } else if (incomingCampaignId === '__create__') {
+        const name = String(req.body?.campaignName || '').trim()
+        const startsAt = String(req.body?.startsAt || '').trim()
+        const endsAt = String(req.body?.endsAt || '').trim()
+        const priority = Math.max(1, Number(req.body?.priority || 1))
+
+        if (!name || !startsAt || !endsAt) {
+          return res.status(400).json({
+            error: 'Para criar campanha, informe nome, inicio e fim'
+          })
+        }
+        if (new Date(startsAt).getTime() >= new Date(endsAt).getTime()) {
+          return res.status(400).json({
+            error: 'Data/hora de fim deve ser maior que a de inicio'
+          })
+        }
+
+        const created = await db.run(
+          `
+          INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, created_by_user_id)
+          VALUES (?, ?, ?, ?, 1, ?, ?)
+          `,
+          [groupId, name, startsAt, endsAt, priority, req.user.id || null]
+        )
+        campaignId = created.lastID
+      }
+
+      if (req.user.role !== 'master' && !campaignId) {
+        return res.status(400).json({
+          error: 'Usuario de grupo deve selecionar ou criar uma campanha'
+        })
+      }
+
+      const positionInfo = campaignId
+        ? await db.get(
+            'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ? AND campaign_id = ?',
+            [groupId, campaignId]
+          )
+        : await db.get(
+            'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ? AND campaign_id IS NULL',
+            [groupId]
+          )
+      const insertPosition = positionInfo.nextPosition
+
+      await db.run(
+        `
+        INSERT INTO slides (group_id, campaign_id, type, name, src, duration, position, is_locked, created_by_user_id)
+        VALUES (?, ?, 'image', ?, ?, ?, ?, 0, ?)
+        `,
+        [
+          groupId,
+          campaignId,
+          file.originalname,
+          `/uploads/images/${file.filename}`,
+          duration,
+          insertPosition,
+          req.user.id || null
+        ]
+      )
+
+      await emitGroupUpdate(req, 'playlist:update', groupId)
+      return res.json({ ok: true, campaignId, uploaded: 1 })
+    } catch (error) {
+      return next(error)
+    }
+  }
+)
 
 router.get('/settings', async (req, res, next) => {
   try {
@@ -299,28 +699,57 @@ router.post('/upload', requireAuth, upload.single('media'), async (req, res, nex
     }/${file.filename}`
 
     const duration = Math.max(1000, Number(req.body?.duration || 5) * 1000)
+    const campaignId = req.body?.campaignId ? Number(req.body.campaignId) : null
     const shouldLock =
       req.user.role === 'master' &&
       (req.body?.protectSlide === '1' || req.body?.protectSlide === 'true')
 
+    if (req.user.role !== 'master' && !campaignId) {
+      return res.status(400).json({
+        error: 'Selecione ou crie uma campanha antes de enviar a midia'
+      })
+    }
+
     const db = await getDb()
-    const positionInfo = await db.get(
-      'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ?',
-      [groupId]
-    )
+    if (campaignId) {
+      const campaign = await db.get(
+        'SELECT id FROM campaigns WHERE id = ? AND group_id = ?',
+        [campaignId, groupId]
+      )
+      if (!campaign) {
+        return res.status(400).json({ error: 'Campanha invalida para este grupo' })
+      }
+    }
+
+    let insertPosition = 0
+    if (shouldLock) {
+      // Master-protected slides are pinned to the top on insert.
+      await db.run(
+        'UPDATE slides SET position = position + 1 WHERE group_id = ?',
+        [groupId]
+      )
+      insertPosition = 0
+    } else {
+      const positionInfo = await db.get(
+        'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ?',
+        [groupId]
+      )
+      insertPosition = positionInfo.nextPosition
+    }
 
     await db.run(
       `
-      INSERT INTO slides (group_id, type, name, src, duration, position, is_locked, created_by_user_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO slides (group_id, campaign_id, type, name, src, duration, position, is_locked, created_by_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         groupId,
+        campaignId,
         type,
         String(req.body?.name || file.originalname),
         src,
         duration,
-        positionInfo.nextPosition,
+        insertPosition,
         shouldLock ? 1 : 0,
         req.user.id || null
       ]
@@ -355,7 +784,7 @@ router.post('/reorder', requireAuth, express.json(), async (req, res, next) => {
 
     const newIndex = index + dir
     if (newIndex < 0 || newIndex >= slides.length) {
-      return res.sendStatus(200)
+      return res.json({ ok: true, changed: false })
     }
 
     const current = slides[index]
@@ -387,7 +816,7 @@ router.post('/reorder', requireAuth, express.json(), async (req, res, next) => {
     }
 
     await emitGroupUpdate(req, 'playlist:update', groupId)
-    return res.sendStatus(200)
+    return res.json({ ok: true, changed: true })
   } catch (error) {
     return next(error)
   }
@@ -445,7 +874,7 @@ router.post('/delete', requireAuth, express.json(), async (req, res, next) => {
     }
 
     await emitGroupUpdate(req, 'playlist:update', groupId)
-    return res.sendStatus(200)
+    return res.json({ ok: true })
   } catch (error) {
     return next(error)
   }

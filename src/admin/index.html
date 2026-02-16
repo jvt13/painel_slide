@@ -47,44 +47,69 @@
 
       <main class="grid">
         <section class="card">
-          <h2>Upload de Midia</h2>
-          <form class="form" action="/media/upload" method="POST" enctype="multipart/form-data" id="upload-form">
-            <input type="hidden" name="groupId" id="upload-group-id" />
+          <h2>Upload da Campanha</h2>
+          <form class="form" id="upload-form">
             <label class="field">
-              <span>Arquivo</span>
-              <input type="file" id="media-file" name="media" accept="image/*,video/*,.pdf" required />
+              <span>Campanha</span>
+              <select id="campaign-select" name="campaignId">
+                <option value="">Carregando campanhas...</option>
+              </select>
+            </label>
+
+            <div class="form hidden" id="campaign-create-wrap">
+              <label class="field">
+                <span>Nome da nova campanha</span>
+                <input type="text" id="campaign-create-name" />
+              </label>
+              <label class="field">
+                <span>Inicio</span>
+                <input type="datetime-local" id="campaign-create-start" />
+              </label>
+              <label class="field">
+                <span>Fim</span>
+                <input type="datetime-local" id="campaign-create-end" />
+              </label>
+              <label class="field">
+                <span>Prioridade</span>
+                <input type="number" id="campaign-create-priority" min="1" value="1" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Imagem da campanha</span>
+              <input type="file" id="media-file" name="mediaFile" accept="image/*" required />
             </label>
 
             <label class="field">
-              <span>Nome da midia</span>
-              <input type="text" name="name" placeholder="Ex: Promocao de Natal" required />
-            </label>
-
-            <label class="field">
-              <span>Duracao (segundos)</span>
+              <span>Duracao de cada imagem (segundos)</span>
               <input type="number" id="duration" name="duration" min="1" value="5" required />
             </label>
 
-            <label class="field hidden" id="protect-slide-wrap">
-              <span>
-                <input type="checkbox" id="protect-slide" name="protectSlide" value="1" />
-                Proteger slide (somente master pode mover/excluir)
-              </span>
-            </label>
-
-            <button class="btn primary" type="submit">Enviar</button>
+            <button class="btn primary" type="submit">Enviar imagem</button>
           </form>
         </section>
 
         <section class="card">
           <div class="card-header">
-            <h2>Playlist</h2>
-            <button class="btn ghost" type="button" onclick="loadPlaylist()">Atualizar</button>
+            <h2>Campanhas do Grupo</h2>
+            <button class="btn ghost" type="button" onclick="loadCampaigns()">Atualizar</button>
           </div>
-          <ul id="playlist" class="playlist"></ul>
-          <p id="empty" class="empty">Nenhum arquivo na playlist.</p>
+          <ul id="campaign-list" class="users-list"></ul>
+          <div id="campaign-slides-wrap" class="campaign-slides-wrap hidden">
+            <p class="helper">Midias da campanha selecionada</p>
+            <ul id="campaign-slides-list" class="playlist"></ul>
+          </div>
         </section>
       </main>
+
+      <section class="card settings">
+        <div class="card-header">
+          <h2>Preview do Player</h2>
+          <button class="btn ghost" type="button" onclick="refreshPlayerPreview()">Atualizar</button>
+        </div>
+        <p id="running-campaign" class="helper">Carregando campanha em execucao...</p>
+        <iframe id="player-preview" class="player-preview" src="/player"></iframe>
+      </section>
 
       <section class="card settings">
         <div class="card-header">
@@ -142,6 +167,7 @@
         <ul id="groups-order-list" class="users-list"></ul>
         <button class="btn primary" type="button" onclick="saveGroupOrder()">Salvar ordem</button>
       </section>
+
     </div>
   </div>
 
@@ -149,7 +175,10 @@
     let currentUser = null
     let groups = []
     let groupOrder = []
+    let campaigns = []
+    let selectedCampaignViewId = null
     let selectedGroupId = null
+    const GROUP_STORAGE_KEY = 'admin:selectedGroupId'
 
     const loginCard = document.getElementById('login-card')
     const appShell = document.getElementById('app-shell')
@@ -158,17 +187,44 @@
     const usersCard = document.getElementById('users-card')
     const groupsOrderCard = document.getElementById('groups-order-card')
     const newUserGroup = document.getElementById('new-user-group')
-    const protectSlideWrap = document.getElementById('protect-slide-wrap')
-    const protectSlideInput = document.getElementById('protect-slide')
+    const campaignSelect = document.getElementById('campaign-select')
+    const campaignCreateWrap = document.getElementById('campaign-create-wrap')
+    const campaignCreateName = document.getElementById('campaign-create-name')
+    const campaignCreateStart = document.getElementById('campaign-create-start')
+    const campaignCreateEnd = document.getElementById('campaign-create-end')
+    const campaignCreatePriority = document.getElementById('campaign-create-priority')
+    const campaignSlidesWrap = document.getElementById('campaign-slides-wrap')
+    const campaignSlidesList = document.getElementById('campaign-slides-list')
 
     function getGroupQuery() {
       return selectedGroupId ? `?groupId=${selectedGroupId}` : ''
     }
 
+    function buildQuery(extra = {}) {
+      const params = new URLSearchParams()
+      if (selectedGroupId) params.set('groupId', String(selectedGroupId))
+      Object.entries(extra).forEach(([key, value]) => {
+        if (value !== null && value !== undefined && value !== '') {
+          params.set(key, String(value))
+        }
+      })
+      const query = params.toString()
+      return query ? `?${query}` : ''
+    }
+
+    function readStoredGroupId() {
+      const value = localStorage.getItem(GROUP_STORAGE_KEY)
+      const id = Number(value)
+      return Number.isInteger(id) && id > 0 ? id : null
+    }
+
+    function storeGroupId(groupId) {
+      if (!groupId) return
+      localStorage.setItem(GROUP_STORAGE_KEY, String(groupId))
+    }
+
     function syncGroupHiddenFields() {
-      const uploadGroup = document.getElementById('upload-group-id')
       const defaultGroup = document.getElementById('default-image-group-id')
-      if (uploadGroup) uploadGroup.value = selectedGroupId || ''
       if (defaultGroup) defaultGroup.value = selectedGroupId || ''
     }
 
@@ -188,7 +244,6 @@
         groupSwitchWrap.classList.remove('hidden')
         usersCard.classList.remove('hidden')
         groupsOrderCard.classList.remove('hidden')
-        protectSlideWrap.classList.remove('hidden')
         groupSelect.innerHTML = ''
         newUserGroup.innerHTML = ''
         groups.forEach((group) => {
@@ -207,8 +262,6 @@
         groupSwitchWrap.classList.add('hidden')
         usersCard.classList.add('hidden')
         groupsOrderCard.classList.add('hidden')
-        protectSlideWrap.classList.add('hidden')
-        protectSlideInput.checked = false
       }
 
       syncGroupHiddenFields()
@@ -237,9 +290,16 @@
 
         currentUser = me.user
         groups = me.groups || []
-        selectedGroupId = currentUser.role === 'master'
-          ? (groups[0] ? groups[0].id : null)
-          : currentUser.groupId
+        if (currentUser.role === 'master') {
+          const storedGroupId = readStoredGroupId()
+          const hasStoredGroup = groups.some((group) => group.id === storedGroupId)
+          selectedGroupId = hasStoredGroup
+            ? storedGroupId
+            : (groups[0] ? groups[0].id : null)
+        } else {
+          selectedGroupId = currentUser.groupId
+        }
+        storeGroupId(selectedGroupId)
 
         renderAuth()
         await loadAllData()
@@ -251,84 +311,11 @@
 
     async function loadAllData() {
       syncGroupHiddenFields()
-      await Promise.all([loadPlaylist(), loadSettings()])
+      await Promise.all([loadSettings(), loadCampaigns(), loadRunningCampaign()])
+      refreshPlayerPreview()
       if (currentUser && currentUser.role === 'master') {
         await loadUsers()
         await loadGroupOrder()
-      }
-    }
-
-    async function loadPlaylist() {
-      if (!selectedGroupId) return
-      const data = await requestJson(`/media/playlist${getGroupQuery()}`)
-      const list = document.getElementById('playlist')
-      const empty = document.getElementById('empty')
-      list.innerHTML = ''
-
-      if (!data.length) {
-        empty.style.display = 'block'
-        return
-      }
-
-      empty.style.display = 'none'
-
-      data.forEach((item, index) => {
-        const li = document.createElement('li')
-        li.className = 'playlist-item'
-        const blocked = item.isLocked && currentUser.role !== 'master'
-        const lockTag = item.isLocked ? '<span class="lock-tag">Protegido</span>' : ''
-
-        li.innerHTML = `
-          <div class="media">
-            ${item.type === 'image'
-              ? `<img src="${item.src}" alt="${item.name}">`
-              : `<div class="type ${item.type}">${item.type.toUpperCase()}</div>`
-            }
-          </div>
-          <div class="info">
-            <div class="title">${item.name} ${lockTag}</div>
-            <div class="meta">
-              <span>${item.duration / 1000}s</span>
-              <span class="dot">•</span>
-              <span class="kind">${item.type}</span>
-            </div>
-          </div>
-          <div class="actions">
-            <button class="btn ghost" onclick="move(${index}, -1)" ${blocked ? 'disabled' : ''}>↑</button>
-            <button class="btn ghost" onclick="move(${index}, 1)" ${blocked ? 'disabled' : ''}>↓</button>
-            <button class="btn danger" onclick="removeItem(${index})" ${blocked ? 'disabled' : ''}>Excluir</button>
-          </div>
-        `
-
-        list.appendChild(li)
-      })
-    }
-
-    async function move(index, dir) {
-      if (!selectedGroupId) return
-      try {
-        await requestJson('/media/reorder', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ index, dir, groupId: selectedGroupId })
-        })
-        await loadPlaylist()
-      } catch (error) {
-        alert(error.message)
-      }
-    }
-
-    async function removeItem(index) {
-      if (!confirm('Deseja excluir este arquivo?')) return
-      try {
-        await requestJson('/media/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ index, groupId: selectedGroupId })
-        })
-        await loadPlaylist()
-      } catch (error) {
-        alert(error.message)
       }
     }
 
@@ -345,6 +332,217 @@
         preview.src = ''
         preview.classList.add('hidden')
       }
+    }
+
+    function renderCampaignOptions() {
+      const previous = campaignSelect.value
+      const isMaster = currentUser && currentUser.role === 'master'
+      campaignSelect.innerHTML = ''
+
+      if (isMaster) {
+        campaignSelect.innerHTML += '<option value=\"\">Sem campanha (somente master)</option>'
+      } else {
+        campaignSelect.innerHTML += '<option value=\"\" disabled>Selecione uma campanha</option>'
+      }
+
+      campaignSelect.innerHTML += '<option value=\"__create__\">+ Criar nova campanha</option>'
+      campaigns.forEach((campaign) => {
+        const option = document.createElement('option')
+        option.value = String(campaign.id)
+        option.textContent = `${campaign.name} (${campaign.status})`
+        campaignSelect.appendChild(option)
+      })
+
+      const exists = [...campaignSelect.options].some((opt) => opt.value === previous)
+      if (exists) {
+        campaignSelect.value = previous
+      } else if (!isMaster && campaigns.length) {
+        campaignSelect.value = String(campaigns[0].id)
+      } else if (!isMaster) {
+        campaignSelect.value = '__create__'
+      } else {
+        campaignSelect.value = ''
+      }
+
+      const selectedId = Number(campaignSelect.value)
+      if (Number.isInteger(selectedId) && selectedId > 0) {
+        selectedCampaignViewId = selectedId
+      } else if (!selectedCampaignViewId && campaigns.length) {
+        selectedCampaignViewId = campaigns[0].id
+      }
+      toggleCampaignCreateForm()
+    }
+
+    function renderCampaignList() {
+      const list = document.getElementById('campaign-list')
+      list.innerHTML = ''
+
+      if (!campaigns.length) {
+        const li = document.createElement('li')
+        li.className = 'user-item'
+        li.innerHTML = '<span>Nenhuma campanha cadastrada para este grupo</span>'
+        list.appendChild(li)
+        return
+      }
+
+      campaigns.forEach((campaign) => {
+        const li = document.createElement('li')
+        li.className = 'user-item'
+        if (selectedCampaignViewId === campaign.id) {
+          li.classList.add('selected')
+        }
+        li.innerHTML = `
+          <strong>${campaign.name}</strong>
+          <span class="campaign-status ${campaign.status}">${campaign.status.toUpperCase()}</span>
+          <span>${new Date(campaign.startsAt).toLocaleString('pt-BR')} - ${new Date(campaign.endsAt).toLocaleString('pt-BR')}</span>
+          <div class="actions">
+            <button class="btn ghost" onclick="selectCampaignForView(${campaign.id})">Abrir</button>
+            <button class="btn danger" onclick="deleteCampaign(${campaign.id})">Excluir</button>
+          </div>
+        `
+        list.appendChild(li)
+      })
+    }
+
+    function toggleCampaignCreateForm() {
+      const creating = campaignSelect.value === '__create__'
+      campaignCreateWrap.classList.toggle('hidden', !creating)
+      campaignCreateName.required = creating
+      campaignCreateStart.required = creating
+      campaignCreateEnd.required = creating
+    }
+
+    async function loadCampaigns() {
+      if (!selectedGroupId) return
+      campaigns = await requestJson(`/media/campaigns${getGroupQuery()}`)
+      const selectedExists = campaigns.some((campaign) => campaign.id === selectedCampaignViewId)
+      if (!selectedExists) {
+        selectedCampaignViewId = campaigns.length ? campaigns[0].id : null
+      }
+      renderCampaignOptions()
+      renderCampaignList()
+      await loadCampaignSlides()
+    }
+
+    function selectCampaignForView(campaignId) {
+      selectedCampaignViewId = Number(campaignId) || null
+      if (selectedCampaignViewId) {
+        campaignSelect.value = String(selectedCampaignViewId)
+      }
+      renderCampaignList()
+      loadCampaignSlides()
+    }
+
+    function renderCampaignSlides(slides) {
+      campaignSlidesList.innerHTML = ''
+      if (!selectedCampaignViewId) {
+        campaignSlidesWrap.classList.add('hidden')
+        return
+      }
+
+      campaignSlidesWrap.classList.remove('hidden')
+      if (!slides.length) {
+        const li = document.createElement('li')
+        li.className = 'playlist-item'
+        li.innerHTML = '<div class="info"><div class="title">Nenhuma imagem nesta campanha</div></div>'
+        campaignSlidesList.appendChild(li)
+        return
+      }
+
+      slides.forEach((slide) => {
+        const li = document.createElement('li')
+        li.className = 'playlist-item'
+        const durationSeconds = Math.max(1, Math.round(Number(slide.duration || 5000) / 1000))
+        const thumb = slide.type === 'image'
+          ? `<div class="media"><img src="${slide.src}" alt="${slide.name || 'slide'}" /></div>`
+          : `<div class="type ${slide.type}">${String(slide.type || 'midia').toUpperCase()}</div>`
+
+        li.innerHTML = `
+          ${thumb}
+          <div class="info">
+            <div class="title">${slide.name || 'Sem nome'}</div>
+            <div class="meta">
+              <span class="kind">${String(slide.type || 'midia').toUpperCase()}</span>
+              <label class="slide-duration-edit">
+                <span>Duracao (s)</span>
+                <input type="number" min="1" id="slide-duration-${slide.id}" value="${durationSeconds}" />
+              </label>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn ghost" onclick="updateCampaignSlide(${slide.id})">Salvar</button>
+            <button class="btn danger" onclick="deleteCampaignSlide(${slide.id})">Excluir</button>
+          </div>
+        `
+        campaignSlidesList.appendChild(li)
+      })
+    }
+
+    async function loadCampaignSlides() {
+      if (!selectedGroupId || !selectedCampaignViewId) {
+        renderCampaignSlides([])
+        return
+      }
+      const slides = await requestJson(`/media/campaigns/slides${buildQuery({ campaignId: selectedCampaignViewId })}`)
+      renderCampaignSlides(Array.isArray(slides) ? slides : [])
+    }
+
+    async function updateCampaignSlide(slideId) {
+      const input = document.getElementById(`slide-duration-${slideId}`)
+      const duration = Number(input?.value || 0)
+      if (!Number.isFinite(duration) || duration <= 0) {
+        alert('Informe uma duracao valida em segundos')
+        return
+      }
+
+      await requestJson('/media/campaigns/slides/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slideId, duration, groupId: selectedGroupId })
+      })
+      await loadCampaignSlides()
+      await loadRunningCampaign()
+      refreshPlayerPreview()
+    }
+
+    async function deleteCampaignSlide(slideId) {
+      if (!confirm('Deseja excluir esta imagem da campanha?')) return
+      await requestJson('/media/campaigns/slides/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slideId, groupId: selectedGroupId })
+      })
+      await loadCampaignSlides()
+      await loadRunningCampaign()
+      refreshPlayerPreview()
+    }
+
+    async function deleteCampaign(campaignId) {
+      if (!confirm('Deseja excluir esta campanha?')) return
+      await requestJson('/media/campaigns/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId, groupId: selectedGroupId })
+      })
+      await loadCampaigns()
+      await loadRunningCampaign()
+    }
+
+    async function loadRunningCampaign() {
+      if (!selectedGroupId) return
+      const payload = await requestJson(`/media/playlist/active${getGroupQuery()}`)
+      const label = document.getElementById('running-campaign')
+      if (payload.campaign) {
+        label.textContent = `Executando: ${payload.campaign.name} (${payload.slides.length} slides)`
+      } else {
+        label.textContent = `Executando: base sem campanha (${payload.slides.length} slides)`
+      }
+    }
+
+    function refreshPlayerPreview() {
+      if (!selectedGroupId) return
+      const frame = document.getElementById('player-preview')
+      frame.src = `/player?groupId=${selectedGroupId}&_=${Date.now()}`
     }
 
     async function saveSettings() {
@@ -403,6 +601,7 @@
       groupOrder = [...list]
       if (!selectedGroupId && groupOrder.length) {
         selectedGroupId = groupOrder[0].id
+        storeGroupId(selectedGroupId)
       }
       renderAuth()
       renderGroupOrder()
@@ -441,47 +640,16 @@
       }
     }
 
-    function setDuration(seconds, lock) {
+    function setDuration(seconds) {
       const input = document.getElementById('duration')
       if (!input) return
       input.value = Math.max(1, Math.round(seconds))
-      input.disabled = !!lock
-    }
-
-    function unlockDuration() {
-      const input = document.getElementById('duration')
-      if (!input) return
-      input.disabled = false
     }
 
     function handleMediaChange(event) {
-      const file = event.target.files && event.target.files[0]
-      if (!file) {
-        unlockDuration()
-        return
-      }
-
-      if (file.type.startsWith('image') || file.type === 'application/pdf') {
-        setDuration(5, false)
-        return
-      }
-
-      if (file.type.startsWith('video')) {
-        const url = URL.createObjectURL(file)
-        const video = document.createElement('video')
-        video.preload = 'metadata'
-        video.onloadedmetadata = () => {
-          URL.revokeObjectURL(url)
-          if (video.duration && isFinite(video.duration)) {
-            setDuration(video.duration, true)
-          }
-        }
-        video.onerror = () => {
-          URL.revokeObjectURL(url)
-          unlockDuration()
-        }
-        video.src = url
-      }
+      const files = event.target.files
+      if (!files || !files.length) return
+      setDuration(5)
     }
 
     document.getElementById('login-form').addEventListener('submit', async (event) => {
@@ -498,9 +666,16 @@
 
         currentUser = payload.user
         groups = payload.groups || []
-        selectedGroupId = currentUser.role === 'master'
-          ? (groups[0] ? groups[0].id : null)
-          : currentUser.groupId
+        if (currentUser.role === 'master') {
+          const storedGroupId = readStoredGroupId()
+          const hasStoredGroup = groups.some((group) => group.id === storedGroupId)
+          selectedGroupId = hasStoredGroup
+            ? storedGroupId
+            : (groups[0] ? groups[0].id : null)
+        } else {
+          selectedGroupId = currentUser.groupId
+        }
+        storeGroupId(selectedGroupId)
 
         renderAuth()
         await loadAllData()
@@ -513,6 +688,8 @@
       await requestJson('/auth/logout', { method: 'POST' })
       currentUser = null
       groups = []
+      campaigns = []
+      selectedCampaignViewId = null
       selectedGroupId = null
       renderAuth()
     })
@@ -540,9 +717,92 @@
       }
     })
 
+    document.getElementById('upload-form').addEventListener('submit', async (event) => {
+      event.preventDefault()
+      if (!selectedGroupId) {
+        return
+      }
+
+      const isMaster = currentUser && currentUser.role === 'master'
+      const selectedCampaign = campaignSelect.value
+      const fileInput = document.getElementById('media-file')
+
+      if (!fileInput.files || !fileInput.files[0]) {
+        alert('Selecione uma imagem')
+        return
+      }
+
+      if (!isMaster && !selectedCampaign) {
+        alert('Selecione ou crie uma campanha para enviar a midia')
+        return
+      }
+
+      try {
+        const form = new FormData()
+        form.append('groupId', String(selectedGroupId))
+        form.append('duration', String(document.getElementById('duration').value || 5))
+        if (selectedCampaign) form.append('campaignId', selectedCampaign)
+
+        if (selectedCampaign === '__create__') {
+          const name = campaignCreateName.value.trim()
+          const startsAtRaw = campaignCreateStart.value
+          const endsAtRaw = campaignCreateEnd.value
+          const priority = Number(campaignCreatePriority.value || 1)
+
+          if (!name || !startsAtRaw || !endsAtRaw) {
+            alert('Preencha os dados da nova campanha antes de enviar a midia')
+            return
+          }
+
+          form.append('campaignName', name)
+          form.append('startsAt', new Date(startsAtRaw).toISOString())
+          form.append('endsAt', new Date(endsAtRaw).toISOString())
+          form.append('priority', String(priority))
+        }
+
+        form.append('mediaFile', fileInput.files[0])
+
+        const res = await fetch('/media/campaigns/upload', {
+          method: 'POST',
+          body: form,
+          credentials: 'same-origin'
+        })
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}))
+          throw new Error(payload.error || 'Falha ao enviar imagens da campanha')
+        }
+        const payload = await res.json().catch(() => ({}))
+
+        const selectedAfterUpload = payload.campaignId
+          ? String(payload.campaignId)
+          : campaignSelect.value
+        event.target.reset()
+        campaignSelect.value = selectedAfterUpload
+        campaignCreateWrap.classList.add('hidden')
+        await loadCampaigns()
+        if (selectedAfterUpload && selectedAfterUpload !== '__create__') {
+          selectedCampaignViewId = Number(selectedAfterUpload)
+        }
+        await loadCampaignSlides()
+        await loadRunningCampaign()
+        refreshPlayerPreview()
+      } catch (error) {
+        alert(error.message)
+      }
+    })
+
     groupSelect.addEventListener('change', async (event) => {
       selectedGroupId = Number(event.target.value)
+      storeGroupId(selectedGroupId)
       await loadAllData()
+    })
+
+    campaignSelect.addEventListener('change', () => {
+      const selectedId = Number(campaignSelect.value)
+      selectedCampaignViewId = Number.isInteger(selectedId) && selectedId > 0 ? selectedId : null
+      toggleCampaignCreateForm()
+      renderCampaignList()
+      loadCampaignSlides()
     })
 
     document.getElementById('default-image-form').addEventListener('submit', async (event) => {

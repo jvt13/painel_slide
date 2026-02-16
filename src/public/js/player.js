@@ -1,6 +1,9 @@
 ﻿const socket = io()
 
 const DEFAULT_EMPTY_DURATION = 5000
+const params = new URLSearchParams(window.location.search)
+const forcedGroupId = Number(params.get('groupId'))
+const isSingleGroupMode = Number.isInteger(forcedGroupId) && forcedGroupId > 0
 
 let groups = []
 let playQueue = []
@@ -56,16 +59,25 @@ updateClock()
 async function loadGroups() {
   const res = await fetch('/media/groups')
   const data = await res.json()
-  groups = Array.isArray(data) ? data : []
+  const allGroups = Array.isArray(data) ? data : []
+  if (isSingleGroupMode) {
+    const selectedGroup = allGroups.find((group) => group.id === forcedGroupId)
+    groups = selectedGroup ? [selectedGroup] : []
+    return
+  }
+  groups = allGroups
 }
 
 async function loadGroupData(groupId) {
   const [playlistRes, settingsRes] = await Promise.all([
-    fetch(`/media/playlist?groupId=${groupId}`),
+    fetch(`/media/playlist/active?groupId=${groupId}`),
     fetch(`/media/settings?groupId=${groupId}`, { cache: 'no-store' })
   ])
 
-  const groupPlaylist = await playlistRes.json()
+  const playlistPayload = await playlistRes.json()
+  const groupPlaylist = Array.isArray(playlistPayload.slides)
+    ? playlistPayload.slides
+    : []
   const settings = await settingsRes.json()
 
   groupPlaylists.set(groupId, Array.isArray(groupPlaylist) ? groupPlaylist : [])
@@ -211,12 +223,14 @@ async function refreshAll() {
   buildPlayQueue()
 }
 
-socket.on('playlist:update', async () => {
+socket.on('playlist:update', async (payload = {}) => {
+  if (isSingleGroupMode && payload.groupId && Number(payload.groupId) !== forcedGroupId) return
   await refreshAll()
   showCurrentEntry()
 })
 
-socket.on('settings:update', async () => {
+socket.on('settings:update', async (payload = {}) => {
+  if (isSingleGroupMode && payload.groupId && Number(payload.groupId) !== forcedGroupId) return
   await refreshAll()
   showCurrentEntry()
 })
