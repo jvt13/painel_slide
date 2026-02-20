@@ -109,6 +109,48 @@ router.get('/groups', requireAuth, async (req, res, next) => {
   }
 })
 
+router.post('/groups', requireAuth, requireMaster, express.json(), async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim()
+    if (!name) {
+      return res.status(400).json({ error: 'Informe o nome do grupo' })
+    }
+    if (name.length < 2) {
+      return res.status(400).json({ error: 'Nome do grupo muito curto' })
+    }
+
+    const db = await getDb()
+    const existing = await db.get('SELECT id FROM groups WHERE lower(name) = lower(?)', [name])
+    if (existing) {
+      return res.status(409).json({ error: 'Grupo ja existe' })
+    }
+
+    const nextOrder = await db.get(
+      'SELECT COALESCE(MAX(display_order), 0) + 1 as nextOrder FROM groups'
+    )
+
+    const result = await db.run(
+      `
+      INSERT INTO groups (name, display_order, background, default_image)
+      VALUES (?, ?, '#ffffff', NULL)
+      `,
+      [name, nextOrder.nextOrder]
+    )
+
+    const created = await db.get(
+      'SELECT id, name, display_order as displayOrder FROM groups WHERE id = ?',
+      [result.lastID]
+    )
+
+    const io = req.app.get('io')
+    io.emit('groups:update', { groupId: created.id })
+
+    return res.status(201).json(created)
+  } catch (error) {
+    return next(error)
+  }
+})
+
 router.get('/users', requireAuth, requireMaster, async (req, res, next) => {
   try {
     const db = await getDb()
@@ -170,6 +212,80 @@ router.post('/users', requireAuth, requireMaster, express.json(), async (req, re
     )
 
     return res.status(201).json(created)
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.get('/sql/schema', requireAuth, requireMaster, async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const tables = await db.all(
+      `
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+      ORDER BY name
+      `
+    )
+
+    const result = []
+    for (const table of tables) {
+      const columns = await db.all(`PRAGMA table_info(${table.name})`)
+      result.push({
+        name: table.name,
+        columns: columns.map((col) => ({
+          name: col.name,
+          type: col.type,
+          notNull: Number(col.notnull) === 1,
+          pk: Number(col.pk) === 1
+        }))
+      })
+    }
+
+    return res.json({ tables: result })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post('/sql/execute', requireAuth, requireMaster, express.json(), async (req, res, next) => {
+  try {
+    const sql = String(req.body?.sql || '').trim()
+    if (!sql) {
+      return res.status(400).json({ error: 'Informe um SQL para executar' })
+    }
+    if (sql.length > 20000) {
+      return res.status(400).json({ error: 'SQL muito grande (maximo 20000 caracteres)' })
+    }
+
+    const statements = sql
+      .split(';')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    if (statements.length > 1) {
+      return res.status(400).json({ error: 'Execute apenas um comando por vez' })
+    }
+
+    const normalized = statements[0] || sql
+    const command = (normalized.match(/^\s*([a-z]+)/i) || [null, ''])[1].toUpperCase()
+    const db = await getDb()
+
+    if (['SELECT', 'PRAGMA', 'WITH', 'EXPLAIN'].includes(command)) {
+      const rows = await db.all(normalized)
+      return res.json({
+        mode: 'query',
+        rowCount: rows.length,
+        rows
+      })
+    }
+
+    const runResult = await db.run(normalized)
+    return res.json({
+      mode: 'exec',
+      changes: Number(runResult?.changes || 0),
+      lastID: runResult?.lastID || null
+    })
   } catch (error) {
     return next(error)
   }

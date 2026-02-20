@@ -22,7 +22,7 @@
           <input type="password" id="login-password" required />
         </label>
         <button class="btn primary" type="submit">Entrar</button>
-        <p class="helper">Usuario master padrao: <strong>master</strong> / senha: <strong>admin123</strong></p>
+        <!--<p class="helper">Usuario master padrao: <strong>master</strong> / senha: <strong>admin123</strong></p>-->
       </form>
     </section>
 
@@ -37,6 +37,7 @@
             <span>Grupo</span>
             <select id="group-select"></select>
           </label>
+          <a href="/admin/sql" class="btn ghost hidden" id="sql-console-link">SQL</a>
           <div class="status" id="server-status">
             <span class="status-dot" id="status-dot"></span>
             <span id="status-text">Servidor ativo</span>
@@ -51,29 +52,13 @@
           <form class="form" id="upload-form">
             <label class="field">
               <span>Campanha</span>
-              <select id="campaign-select" name="campaignId">
-                <option value="">Carregando campanhas...</option>
-              </select>
+              <div class="campaign-select-row">
+                <select id="campaign-select" name="campaignId">
+                  <option value="">Carregando campanhas...</option>
+                </select>
+                <button type="button" class="btn ghost" id="open-campaign-modal-btn">Nova campanha</button>
+              </div>
             </label>
-
-            <div class="form hidden" id="campaign-create-wrap">
-              <label class="field">
-                <span>Nome da nova campanha</span>
-                <input type="text" id="campaign-create-name" />
-              </label>
-              <label class="field">
-                <span>Inicio</span>
-                <input type="datetime-local" id="campaign-create-start" />
-              </label>
-              <label class="field">
-                <span>Fim</span>
-                <input type="datetime-local" id="campaign-create-end" />
-              </label>
-              <label class="field">
-                <span>Prioridade</span>
-                <input type="number" id="campaign-create-priority" min="1" value="1" />
-              </label>
-            </div>
 
             <label class="field">
               <span>Imagem da campanha</span>
@@ -81,9 +66,21 @@
             </label>
 
             <label class="field">
+              <span>Nome da imagem</span>
+              <input type="text" id="media-name" name="name" placeholder="Ex: capa_operacao" required />
+            </label>
+
+            <label class="field">
               <span>Duracao de cada imagem (segundos)</span>
               <input type="number" id="duration" name="duration" min="1" value="5" required />
             </label>
+
+            <!--<label class="field hidden" id="protect-slide-wrap">
+              <span>
+                <input type="checkbox" id="protect-slide" name="protectSlide" value="1" />
+                Proteger slide (somente master pode mover/excluir)
+              </span>
+            </label>-->
 
             <button class="btn primary" type="submit">Enviar imagem</button>
           </form>
@@ -95,8 +92,12 @@
             <button class="btn ghost" type="button" onclick="loadCampaigns()">Atualizar</button>
           </div>
           <ul id="campaign-list" class="users-list"></ul>
-          <div id="campaign-slides-wrap" class="campaign-slides-wrap hidden">
-            <p class="helper">Midias da campanha selecionada</p>
+          <div id="cover-slides-wrap" class="campaign-slides-wrap">
+            <p class="helper" id="cover-slides-title">Capas do grupo (somente master)</p>
+            <ul id="cover-slides-list" class="playlist"></ul>
+          </div>
+          <div id="campaign-slides-wrap" class="campaign-slides-wrap">
+            <p class="helper" id="campaign-slides-title">Midias da campanha selecionada</p>
             <ul id="campaign-slides-list" class="playlist"></ul>
           </div>
         </section>
@@ -111,17 +112,24 @@
         <iframe id="player-preview" class="player-preview" src="/player"></iframe>
       </section>
 
-      <section class="card settings">
+      <section class="card settings hidden" id="settings-card">
         <div class="card-header">
           <h2>Configuracoes do Grupo</h2>
           <button class="btn ghost" type="button" onclick="loadSettings()">Atualizar</button>
         </div>
+        <!--
+          Configuracao de cor mantida para uso futuro.
+          Quando reativar, manter visivel somente para master.
         <div class="form">
           <label class="field">
             <span>Cor de fundo</span>
             <input type="color" id="bg-color" value="#ffffff" />
           </label>
           <button class="btn primary" type="button" onclick="saveSettings()">Salvar cor</button>
+        </div>
+        -->
+        <div class="form">
+          <!--
           <form class="form-inline" id="default-image-form">
             <input type="hidden" name="groupId" id="default-image-group-id" />
             <input type="file" name="defaultImage" id="default-image-input" accept="image/*" required />
@@ -132,31 +140,33 @@
             <span class="preview-label">Imagem padrao atual</span>
             <img id="default-image-preview" class="default-preview hidden" alt="Imagem padrao" />
           </div>
+          -->
+          <p class="helper">Configuracoes visuais desativadas no momento.</p>
         </div>
       </section>
 
       <section class="card settings hidden" id="users-card">
         <div class="card-header">
           <h2>Gestao de Usuarios</h2>
-          <button class="btn ghost" type="button" onclick="loadUsers()">Atualizar</button>
+          <button class="btn ghost" type="button" onclick="refreshUsersAndGroups()">Atualizar</button>
         </div>
-        <form class="form" id="create-user-form">
-          <label class="field">
-            <span>Usuario</span>
-            <input type="text" id="new-username" required />
-          </label>
-          <label class="field">
-            <span>Senha</span>
-            <input type="password" id="new-password" required />
-          </label>
-          <label class="field">
-            <span>Grupo</span>
-            <select id="new-user-group"></select>
-          </label>
-          <button class="btn primary" type="submit">Criar usuario do grupo</button>
-          <p class="helper" id="create-user-msg"></p>
-        </form>
-        <ul id="users-list" class="users-list"></ul>
+        <div class="management-grid">
+          <section class="management-panel">
+            <div class="panel-header">
+              <h3>Usuarios</h3>
+              <button class="btn primary" type="button" id="open-user-modal-btn">Criar usuario</button>
+            </div>
+            <ul id="users-list" class="users-list"></ul>
+          </section>
+          <section class="management-panel">
+            <div class="panel-header">
+              <h3>Grupos</h3>
+              <button class="btn primary" type="button" id="open-group-modal-btn">Criar grupo</button>
+            </div>
+            <ul id="groups-list" class="users-list"></ul>
+          </section>
+        </div>
+        <p class="helper" id="create-user-msg"></p>
       </section>
 
       <section class="card settings hidden" id="groups-order-card">
@@ -171,6 +181,83 @@
     </div>
   </div>
 
+  <div id="campaign-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2 id="campaign-modal-title">Nova Campanha</h2>
+        <button type="button" class="btn ghost" id="close-campaign-modal-btn">Fechar</button>
+      </div>
+      <div class="form">
+        <label class="field">
+          <span>Nome da campanha</span>
+          <input type="text" id="campaign-create-name" />
+        </label>
+        <label class="field">
+          <span>Inicio</span>
+          <input type="datetime-local" id="campaign-create-start" />
+        </label>
+        <label class="field">
+          <span>Fim</span>
+          <input type="datetime-local" id="campaign-create-end" />
+        </label>
+        <label class="field">
+          <span>Prioridade</span>
+          <input type="number" id="campaign-create-priority" min="1" value="1" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" id="cancel-campaign-modal-btn">Cancelar</button>
+          <button type="button" class="btn primary" id="save-campaign-modal-btn">Salvar campanha</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="user-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2 id="user-modal-title">Criar Usuario</h2>
+        <button type="button" class="btn ghost" id="close-user-modal-btn">Fechar</button>
+      </div>
+      <form class="form" id="create-user-form">
+        <label class="field">
+          <span>Usuario</span>
+          <input type="text" id="new-username" required />
+        </label>
+        <label class="field">
+          <span>Senha</span>
+          <input type="password" id="new-password" required />
+        </label>
+        <label class="field">
+          <span>Grupo</span>
+          <select id="new-user-group"></select>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" id="cancel-user-modal-btn">Cancelar</button>
+          <button class="btn primary" type="submit">Criar usuario</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="group-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="group-modal-title">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2 id="group-modal-title">Criar Grupo</h2>
+        <button type="button" class="btn ghost" id="close-group-modal-btn">Fechar</button>
+      </div>
+      <form class="form" id="create-group-form">
+        <label class="field">
+          <span>Nome do grupo</span>
+          <input type="text" id="new-group-name" required />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" id="cancel-group-modal-btn">Cancelar</button>
+          <button class="btn primary" type="submit">Criar grupo</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
     let currentUser = null
     let groups = []
@@ -178,6 +265,10 @@
     let campaigns = []
     let selectedCampaignViewId = null
     let selectedGroupId = null
+    let isAutoRefreshingAdmin = false
+    let autoRefreshMs = 15000
+    let campaignModalMode = 'create'
+    let editingCampaignId = null
     const GROUP_STORAGE_KEY = 'admin:selectedGroupId'
 
     const loginCard = document.getElementById('login-card')
@@ -186,15 +277,38 @@
     const groupSwitchWrap = document.getElementById('group-switch-wrap')
     const usersCard = document.getElementById('users-card')
     const groupsOrderCard = document.getElementById('groups-order-card')
+    const settingsCard = document.getElementById('settings-card')
+    const sqlConsoleLink = document.getElementById('sql-console-link')
+    const protectSlideWrap = document.getElementById('protect-slide-wrap')
+    const protectSlideInput = document.getElementById('protect-slide')
     const newUserGroup = document.getElementById('new-user-group')
+    const usersList = document.getElementById('users-list')
+    const groupsList = document.getElementById('groups-list')
+    const userModal = document.getElementById('user-modal')
+    const groupModal = document.getElementById('group-modal')
+    const openUserModalBtn = document.getElementById('open-user-modal-btn')
+    const openGroupModalBtn = document.getElementById('open-group-modal-btn')
+    const closeUserModalBtn = document.getElementById('close-user-modal-btn')
+    const closeGroupModalBtn = document.getElementById('close-group-modal-btn')
+    const cancelUserModalBtn = document.getElementById('cancel-user-modal-btn')
+    const cancelGroupModalBtn = document.getElementById('cancel-group-modal-btn')
     const campaignSelect = document.getElementById('campaign-select')
-    const campaignCreateWrap = document.getElementById('campaign-create-wrap')
+    const campaignModal = document.getElementById('campaign-modal')
+    const openCampaignModalBtn = document.getElementById('open-campaign-modal-btn')
+    const closeCampaignModalBtn = document.getElementById('close-campaign-modal-btn')
+    const cancelCampaignModalBtn = document.getElementById('cancel-campaign-modal-btn')
+    const saveCampaignModalBtn = document.getElementById('save-campaign-modal-btn')
+    const campaignModalTitle = document.getElementById('campaign-modal-title')
     const campaignCreateName = document.getElementById('campaign-create-name')
     const campaignCreateStart = document.getElementById('campaign-create-start')
     const campaignCreateEnd = document.getElementById('campaign-create-end')
     const campaignCreatePriority = document.getElementById('campaign-create-priority')
+    const coverSlidesWrap = document.getElementById('cover-slides-wrap')
+    const coverSlidesList = document.getElementById('cover-slides-list')
+    const coverSlidesTitle = document.getElementById('cover-slides-title')
     const campaignSlidesWrap = document.getElementById('campaign-slides-wrap')
     const campaignSlidesList = document.getElementById('campaign-slides-list')
+    const campaignSlidesTitle = document.getElementById('campaign-slides-title')
 
     function getGroupQuery() {
       return selectedGroupId ? `?groupId=${selectedGroupId}` : ''
@@ -228,6 +342,63 @@
       if (defaultGroup) defaultGroup.value = selectedGroupId || ''
     }
 
+    function openModal(modalEl) {
+      modalEl.classList.remove('hidden')
+      document.body.classList.add('modal-open')
+    }
+
+    function closeModal(modalEl) {
+      modalEl.classList.add('hidden')
+      if (
+        userModal.classList.contains('hidden') &&
+        groupModal.classList.contains('hidden') &&
+        campaignModal.classList.contains('hidden')
+      ) {
+        document.body.classList.remove('modal-open')
+      }
+    }
+
+    function closeAllModals() {
+      closeModal(campaignModal)
+      closeModal(userModal)
+      closeModal(groupModal)
+    }
+
+    function openCampaignModal(mode = 'create', campaign = null) {
+      campaignModalMode = mode
+      editingCampaignId = campaign && campaign.id ? Number(campaign.id) : null
+      campaignModalTitle.textContent = mode === 'edit' ? 'Editar Campanha' : 'Nova Campanha'
+      saveCampaignModalBtn.textContent = mode === 'edit' ? 'Salvar alteracoes' : 'Salvar campanha'
+
+      if (mode === 'edit' && campaign) {
+        campaignCreateName.value = campaign.name || ''
+        campaignCreateStart.value = toDatetimeLocal(campaign.startsAt)
+        campaignCreateEnd.value = toDatetimeLocal(campaign.endsAt)
+        campaignCreatePriority.value = Number(campaign.priority || 1)
+      } else {
+        campaignCreateName.value = ''
+        campaignCreateStart.value = ''
+        campaignCreateEnd.value = ''
+        campaignCreatePriority.value = 1
+      }
+
+      openModal(campaignModal)
+      setTimeout(() => campaignCreateName.focus(), 30)
+    }
+
+    function closeCampaignModal() {
+      campaignModalMode = 'create'
+      editingCampaignId = null
+      closeModal(campaignModal)
+    }
+
+    function toDatetimeLocal(value) {
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return ''
+      const pad = (n) => String(n).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+    }
+
     function renderAuth() {
       const userLabel = document.getElementById('user-label')
       if (!currentUser) {
@@ -244,6 +415,9 @@
         groupSwitchWrap.classList.remove('hidden')
         usersCard.classList.remove('hidden')
         groupsOrderCard.classList.remove('hidden')
+        sqlConsoleLink.classList.remove('hidden')
+        if (settingsCard) settingsCard.classList.add('hidden')
+        if (protectSlideWrap) protectSlideWrap.classList.remove('hidden')
         groupSelect.innerHTML = ''
         newUserGroup.innerHTML = ''
         groups.forEach((group) => {
@@ -262,6 +436,10 @@
         groupSwitchWrap.classList.add('hidden')
         usersCard.classList.add('hidden')
         groupsOrderCard.classList.add('hidden')
+        sqlConsoleLink.classList.add('hidden')
+        if (settingsCard) settingsCard.classList.add('hidden')
+        if (protectSlideWrap) protectSlideWrap.classList.add('hidden')
+        if (protectSlideInput) protectSlideInput.checked = false
       }
 
       syncGroupHiddenFields()
@@ -279,6 +457,18 @@
       return res.json()
     }
 
+    async function loadRuntimeConfig() {
+      try {
+        const payload = await requestJson('/media/runtime-config', { cache: 'no-store' })
+        const value = Number(payload?.autoRefreshMs)
+        if (Number.isFinite(value) && value >= 5000) {
+          autoRefreshMs = value
+        }
+      } catch (error) {
+        // keep default interval
+      }
+    }
+
     async function bootstrap() {
       try {
         const me = await requestJson('/auth/me')
@@ -291,11 +481,7 @@
         currentUser = me.user
         groups = me.groups || []
         if (currentUser.role === 'master') {
-          const storedGroupId = readStoredGroupId()
-          const hasStoredGroup = groups.some((group) => group.id === storedGroupId)
-          selectedGroupId = hasStoredGroup
-            ? storedGroupId
-            : (groups[0] ? groups[0].id : null)
+          selectedGroupId = groups[0] ? groups[0].id : null
         } else {
           selectedGroupId = currentUser.groupId
         }
@@ -314,38 +500,57 @@
       await Promise.all([loadSettings(), loadCampaigns(), loadRunningCampaign()])
       refreshPlayerPreview()
       if (currentUser && currentUser.role === 'master') {
-        await loadUsers()
+        await refreshUsersAndGroups()
         await loadGroupOrder()
       }
+    }
+
+    async function autoRefreshAdmin() {
+      if (!currentUser || !selectedGroupId || isAutoRefreshingAdmin) return
+      isAutoRefreshingAdmin = true
+      try {
+        await Promise.all([loadCampaigns(), loadRunningCampaign()])
+      } catch (error) {
+        // ignore transient network errors in automatic refresh
+      } finally {
+        isAutoRefreshingAdmin = false
+      }
+    }
+
+    async function refreshUsersAndGroups() {
+      await Promise.all([loadUsers(), loadGroupsList()])
     }
 
     async function loadSettings() {
       if (!selectedGroupId) return
       const settings = await requestJson(`/media/settings${getGroupQuery()}`)
-      document.getElementById('bg-color').value = settings.background || '#ffffff'
+      const bgColor = document.getElementById('bg-color')
+      if (bgColor) {
+        bgColor.value = settings.background || '#ffffff'
+      }
 
       const preview = document.getElementById('default-image-preview')
-      if (settings.defaultImage) {
+      if (preview && settings.defaultImage) {
         preview.src = settings.defaultImage
         preview.classList.remove('hidden')
-      } else {
+      } else if (preview) {
         preview.src = ''
         preview.classList.add('hidden')
       }
     }
 
-    function renderCampaignOptions() {
+    function renderCampaignOptions(preferredCampaignId = null) {
       const previous = campaignSelect.value
       const isMaster = currentUser && currentUser.role === 'master'
       campaignSelect.innerHTML = ''
 
       if (isMaster) {
         campaignSelect.innerHTML += '<option value=\"\">Sem campanha (somente master)</option>'
+      } else if (!campaigns.length) {
+        campaignSelect.innerHTML += '<option value=\"\" selected disabled>Nenhuma campanha (clique em Nova campanha)</option>'
       } else {
         campaignSelect.innerHTML += '<option value=\"\" disabled>Selecione uma campanha</option>'
       }
-
-      campaignSelect.innerHTML += '<option value=\"__create__\">+ Criar nova campanha</option>'
       campaigns.forEach((campaign) => {
         const option = document.createElement('option')
         option.value = String(campaign.id)
@@ -353,13 +558,17 @@
         campaignSelect.appendChild(option)
       })
 
+      const preferred = preferredCampaignId ? String(preferredCampaignId) : null
+      const hasPreferred = preferred
+        ? [...campaignSelect.options].some((opt) => opt.value === preferred)
+        : false
       const exists = [...campaignSelect.options].some((opt) => opt.value === previous)
-      if (exists) {
+      if (hasPreferred) {
+        campaignSelect.value = preferred
+      } else if (exists) {
         campaignSelect.value = previous
       } else if (!isMaster && campaigns.length) {
         campaignSelect.value = String(campaigns[0].id)
-      } else if (!isMaster) {
-        campaignSelect.value = '__create__'
       } else {
         campaignSelect.value = ''
       }
@@ -370,7 +579,6 @@
       } else if (!selectedCampaignViewId && campaigns.length) {
         selectedCampaignViewId = campaigns[0].id
       }
-      toggleCampaignCreateForm()
     }
 
     function renderCampaignList() {
@@ -388,6 +596,8 @@
       campaigns.forEach((campaign) => {
         const li = document.createElement('li')
         li.className = 'user-item'
+        li.style.cursor = 'pointer'
+        li.addEventListener('click', () => selectCampaignForView(campaign.id))
         if (selectedCampaignViewId === campaign.id) {
           li.classList.add('selected')
         }
@@ -396,32 +606,37 @@
           <span class="campaign-status ${campaign.status}">${campaign.status.toUpperCase()}</span>
           <span>${new Date(campaign.startsAt).toLocaleString('pt-BR')} - ${new Date(campaign.endsAt).toLocaleString('pt-BR')}</span>
           <div class="actions">
-            <button class="btn ghost" onclick="selectCampaignForView(${campaign.id})">Abrir</button>
-            <button class="btn danger" onclick="deleteCampaign(${campaign.id})">Excluir</button>
+            <button class="btn ghost" type="button" data-action="edit-campaign">Editar</button>
+            <button class="btn danger" type="button" data-action="delete-campaign">Excluir</button>
           </div>
         `
+        const editBtn = li.querySelector('[data-action="edit-campaign"]')
+        const deleteBtn = li.querySelector('[data-action="delete-campaign"]')
+        editBtn.addEventListener('click', (event) => {
+          event.stopPropagation()
+          editCampaignSchedule(campaign.id)
+        })
+        deleteBtn.addEventListener('click', (event) => {
+          event.stopPropagation()
+          deleteCampaign(campaign.id)
+        })
         list.appendChild(li)
       })
     }
 
-    function toggleCampaignCreateForm() {
-      const creating = campaignSelect.value === '__create__'
-      campaignCreateWrap.classList.toggle('hidden', !creating)
-      campaignCreateName.required = creating
-      campaignCreateStart.required = creating
-      campaignCreateEnd.required = creating
-    }
-
-    async function loadCampaigns() {
+    async function loadCampaigns(preferredCampaignId = null) {
       if (!selectedGroupId) return
       campaigns = await requestJson(`/media/campaigns${getGroupQuery()}`)
+      if (preferredCampaignId) {
+        selectedCampaignViewId = Number(preferredCampaignId)
+      }
       const selectedExists = campaigns.some((campaign) => campaign.id === selectedCampaignViewId)
       if (!selectedExists) {
         selectedCampaignViewId = campaigns.length ? campaigns[0].id : null
       }
-      renderCampaignOptions()
+      renderCampaignOptions(preferredCampaignId)
       renderCampaignList()
-      await loadCampaignSlides()
+      await Promise.all([loadCoverSlides(), loadCampaignSlides()])
     }
 
     function selectCampaignForView(campaignId) {
@@ -433,23 +648,25 @@
       loadCampaignSlides()
     }
 
-    function renderCampaignSlides(slides) {
-      campaignSlidesList.innerHTML = ''
-      if (!selectedCampaignViewId) {
-        campaignSlidesWrap.classList.add('hidden')
-        return
-      }
+    function renderSlideList(listEl, slides, options = {}) {
+      const {
+        emptyText = 'Nenhuma imagem',
+        moveHandler = 'moveCampaignSlide',
+        saveHandler = 'updateCampaignSlide',
+        deleteHandler = 'deleteCampaignSlide',
+        readonly = false
+      } = options
+      listEl.innerHTML = ''
 
-      campaignSlidesWrap.classList.remove('hidden')
       if (!slides.length) {
         const li = document.createElement('li')
-        li.className = 'playlist-item'
-        li.innerHTML = '<div class="info"><div class="title">Nenhuma imagem nesta campanha</div></div>'
-        campaignSlidesList.appendChild(li)
+        li.className = 'playlist-item empty-item'
+        li.innerHTML = `<div class="info"><p class="title">${emptyText}</p></div>`
+        listEl.appendChild(li)
         return
       }
 
-      slides.forEach((slide) => {
+      slides.forEach((slide, index) => {
         const li = document.createElement('li')
         li.className = 'playlist-item'
         const durationSeconds = Math.max(1, Math.round(Number(slide.duration || 5000) / 1000))
@@ -465,17 +682,57 @@
               <span class="kind">${String(slide.type || 'midia').toUpperCase()}</span>
               <label class="slide-duration-edit">
                 <span>Duracao (s)</span>
-                <input type="number" min="1" id="slide-duration-${slide.id}" value="${durationSeconds}" />
+                <input type="number" min="1" id="slide-duration-${slide.id}" value="${durationSeconds}" ${readonly ? 'disabled' : ''} />
               </label>
             </div>
           </div>
           <div class="actions">
-            <button class="btn ghost" onclick="updateCampaignSlide(${slide.id})">Salvar</button>
-            <button class="btn danger" onclick="deleteCampaignSlide(${slide.id})">Excluir</button>
+            <button class="btn ghost" onclick="${moveHandler}(${slide.id}, -1)" ${readonly || index === 0 ? 'disabled' : ''}>↑</button>
+            <button class="btn ghost" onclick="${moveHandler}(${slide.id}, 1)" ${readonly || index === slides.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="btn ghost" onclick="${saveHandler}(${slide.id})" ${readonly ? 'disabled' : ''}>Salvar</button>
+            <button class="btn danger" onclick="${deleteHandler}(${slide.id})" ${readonly ? 'disabled' : ''}>Excluir</button>
           </div>
         `
-        campaignSlidesList.appendChild(li)
+        listEl.appendChild(li)
       })
+    }
+
+    function renderCoverSlides(slides) {
+      const isMaster = currentUser && currentUser.role === 'master'
+      coverSlidesWrap.classList.remove('hidden')
+      coverSlidesTitle.textContent = isMaster
+        ? 'Capas do grupo (somente master)'
+        : 'Capas do grupo'
+      renderSlideList(coverSlidesList, slides, {
+        emptyText: 'Nenhuma capa cadastrada para este grupo',
+        moveHandler: 'moveCoverSlide',
+        saveHandler: 'updateCoverSlide',
+        deleteHandler: 'deleteCoverSlide',
+        readonly: !isMaster
+      })
+    }
+
+    function renderCampaignSlides(slides) {
+      campaignSlidesWrap.classList.remove('hidden')
+      campaignSlidesTitle.textContent = 'Midias da campanha selecionada'
+      renderSlideList(campaignSlidesList, slides, {
+        emptyText: selectedCampaignViewId
+          ? 'Nenhuma imagem nesta campanha'
+          : 'Selecione uma campanha para visualizar as midias',
+        moveHandler: 'moveCampaignSlide',
+        saveHandler: 'updateCampaignSlide',
+        deleteHandler: 'deleteCampaignSlide',
+        readonly: !selectedCampaignViewId
+      })
+    }
+
+    async function loadCoverSlides() {
+      if (!selectedGroupId) {
+        renderCoverSlides([])
+        return
+      }
+      const slides = await requestJson(`/media/campaigns/slides${buildQuery({ campaignId: 'base' })}`)
+      renderCoverSlides(Array.isArray(slides) ? slides : [])
     }
 
     async function loadCampaignSlides() {
@@ -487,7 +744,22 @@
       renderCampaignSlides(Array.isArray(slides) ? slides : [])
     }
 
-    async function updateCampaignSlide(slideId) {
+    async function moveSlide(slideId, dir) {
+      await requestJson('/media/campaigns/slides/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slideId, dir, groupId: selectedGroupId })
+      })
+    }
+
+    async function moveCampaignSlide(slideId, dir) {
+      await moveSlide(slideId, dir)
+      await loadCampaignSlides()
+      await loadRunningCampaign()
+      refreshPlayerPreview()
+    }
+
+    async function updateSlide(slideId) {
       const input = document.getElementById(`slide-duration-${slideId}`)
       const duration = Number(input?.value || 0)
       if (!Number.isFinite(duration) || duration <= 0) {
@@ -500,19 +772,48 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slideId, duration, groupId: selectedGroupId })
       })
+    }
+
+    async function updateCampaignSlide(slideId) {
+      await updateSlide(slideId)
       await loadCampaignSlides()
       await loadRunningCampaign()
       refreshPlayerPreview()
     }
 
-    async function deleteCampaignSlide(slideId) {
+    async function deleteSlide(slideId) {
       if (!confirm('Deseja excluir esta imagem da campanha?')) return
       await requestJson('/media/campaigns/slides/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slideId, groupId: selectedGroupId })
       })
+    }
+
+    async function deleteCampaignSlide(slideId) {
+      await deleteSlide(slideId)
       await loadCampaignSlides()
+      await loadRunningCampaign()
+      refreshPlayerPreview()
+    }
+
+    async function moveCoverSlide(slideId, dir) {
+      await moveSlide(slideId, dir)
+      await loadCoverSlides()
+      await loadRunningCampaign()
+      refreshPlayerPreview()
+    }
+
+    async function updateCoverSlide(slideId) {
+      await updateSlide(slideId)
+      await loadCoverSlides()
+      await loadRunningCampaign()
+      refreshPlayerPreview()
+    }
+
+    async function deleteCoverSlide(slideId) {
+      await deleteSlide(slideId)
+      await loadCoverSlides()
       await loadRunningCampaign()
       refreshPlayerPreview()
     }
@@ -526,6 +827,61 @@
       })
       await loadCampaigns()
       await loadRunningCampaign()
+    }
+
+    function editCampaignSchedule(campaignId) {
+      const campaign = campaigns.find((item) => item.id === Number(campaignId))
+      if (!campaign) return
+      openCampaignModal('edit', campaign)
+    }
+
+    async function createCampaignFromModal() {
+      if (!selectedGroupId) return
+      const name = campaignCreateName.value.trim()
+      const startsAtRaw = campaignCreateStart.value
+      const endsAtRaw = campaignCreateEnd.value
+      const priority = Number(campaignCreatePriority.value || 1)
+
+      if (!name || !startsAtRaw || !endsAtRaw) {
+        alert('Preencha nome, inicio e fim da campanha')
+        return
+      }
+      if (new Date(startsAtRaw).getTime() >= new Date(endsAtRaw).getTime()) {
+        alert('Data/hora de fim deve ser maior que a de inicio')
+        return
+      }
+
+      const payload = {
+        groupId: selectedGroupId,
+        name,
+        startsAt: new Date(startsAtRaw).toISOString(),
+        endsAt: new Date(endsAtRaw).toISOString(),
+        priority
+      }
+
+      if (campaignModalMode === 'edit' && Number.isInteger(editingCampaignId) && editingCampaignId > 0) {
+        await requestJson('/media/campaigns/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, campaignId: editingCampaignId })
+        })
+        await loadCampaigns(editingCampaignId)
+        campaignSelect.value = String(editingCampaignId)
+        selectedCampaignViewId = editingCampaignId
+      } else {
+        const created = await requestJson('/media/campaigns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        const createdId = Number(created?.id)
+        await loadCampaigns(createdId)
+        if (Number.isInteger(createdId) && createdId > 0) {
+          campaignSelect.value = String(createdId)
+          selectedCampaignViewId = createdId
+        }
+      }
+      closeCampaignModal()
     }
 
     async function loadRunningCampaign() {
@@ -547,7 +903,9 @@
 
     async function saveSettings() {
       if (!selectedGroupId) return
-      const background = document.getElementById('bg-color').value
+      const bgColor = document.getElementById('bg-color')
+      if (!bgColor) return
+      const background = bgColor.value
       await requestJson('/media/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -558,8 +916,7 @@
     async function loadUsers() {
       if (!currentUser || currentUser.role !== 'master') return
       const users = await requestJson('/auth/users')
-      const list = document.getElementById('users-list')
-      list.innerHTML = ''
+      usersList.innerHTML = ''
 
       users
         .filter((item) => item.role === 'group_user')
@@ -571,8 +928,23 @@
             <span>${item.groupName || 'Sem grupo'}</span>
             <span>${Number(item.active) === 1 ? 'Ativo' : 'Inativo'}</span>
           `
-          list.appendChild(li)
+          usersList.appendChild(li)
         })
+    }
+
+    async function loadGroupsList() {
+      if (!currentUser || currentUser.role !== 'master') return
+      const list = await requestJson('/media/groups')
+      groupsList.innerHTML = ''
+      list.forEach((group) => {
+        const li = document.createElement('li')
+        li.className = 'user-item'
+        li.innerHTML = `
+          <strong>${group.name}</strong>
+          <span>Ordem #${group.displayOrder || '-'}</span>
+        `
+        groupsList.appendChild(li)
+      })
     }
 
     function renderGroupOrder() {
@@ -649,6 +1021,10 @@
     function handleMediaChange(event) {
       const files = event.target.files
       if (!files || !files.length) return
+      const nameInput = document.getElementById('media-name')
+      if (nameInput && !nameInput.value.trim()) {
+        nameInput.value = files[0].name.replace(/\.[^.]+$/, '')
+      }
       setDuration(5)
     }
 
@@ -667,11 +1043,7 @@
         currentUser = payload.user
         groups = payload.groups || []
         if (currentUser.role === 'master') {
-          const storedGroupId = readStoredGroupId()
-          const hasStoredGroup = groups.some((group) => group.id === storedGroupId)
-          selectedGroupId = hasStoredGroup
-            ? storedGroupId
-            : (groups[0] ? groups[0].id : null)
+          selectedGroupId = groups[0] ? groups[0].id : null
         } else {
           selectedGroupId = currentUser.groupId
         }
@@ -691,6 +1063,7 @@
       campaigns = []
       selectedCampaignViewId = null
       selectedGroupId = null
+      closeAllModals()
       renderAuth()
     })
 
@@ -711,7 +1084,37 @@
         })
         msg.textContent = 'Usuario criado com sucesso.'
         document.getElementById('create-user-form').reset()
-        await loadUsers()
+        closeModal(userModal)
+        await refreshUsersAndGroups()
+      } catch (error) {
+        msg.textContent = error.message
+      }
+    })
+
+    document.getElementById('create-group-form').addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const msg = document.getElementById('create-user-msg')
+      msg.textContent = ''
+      const name = document.getElementById('new-group-name').value.trim()
+
+      try {
+        await requestJson('/auth/groups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        })
+
+        document.getElementById('create-group-form').reset()
+        closeModal(groupModal)
+
+        groups = await requestJson('/media/groups')
+        if (!selectedGroupId && groups.length) {
+          selectedGroupId = groups[0].id
+          storeGroupId(selectedGroupId)
+        }
+        renderAuth()
+        await Promise.all([refreshUsersAndGroups(), loadGroupOrder(), loadCampaigns(), loadSettings(), loadRunningCampaign()])
+        refreshPlayerPreview()
       } catch (error) {
         msg.textContent = error.message
       }
@@ -725,6 +1128,7 @@
 
       const isMaster = currentUser && currentUser.role === 'master'
       const selectedCampaign = campaignSelect.value
+      const selectedCampaignId = Number(selectedCampaign)
       const fileInput = document.getElementById('media-file')
 
       if (!fileInput.files || !fileInput.files[0]) {
@@ -732,7 +1136,7 @@
         return
       }
 
-      if (!isMaster && !selectedCampaign) {
+      if (!isMaster && (!Number.isInteger(selectedCampaignId) || selectedCampaignId <= 0)) {
         alert('Selecione ou crie uma campanha para enviar a midia')
         return
       }
@@ -741,24 +1145,11 @@
         const form = new FormData()
         form.append('groupId', String(selectedGroupId))
         form.append('duration', String(document.getElementById('duration').value || 5))
-        if (selectedCampaign) form.append('campaignId', selectedCampaign)
-
-        if (selectedCampaign === '__create__') {
-          const name = campaignCreateName.value.trim()
-          const startsAtRaw = campaignCreateStart.value
-          const endsAtRaw = campaignCreateEnd.value
-          const priority = Number(campaignCreatePriority.value || 1)
-
-          if (!name || !startsAtRaw || !endsAtRaw) {
-            alert('Preencha os dados da nova campanha antes de enviar a midia')
-            return
-          }
-
-          form.append('campaignName', name)
-          form.append('startsAt', new Date(startsAtRaw).toISOString())
-          form.append('endsAt', new Date(endsAtRaw).toISOString())
-          form.append('priority', String(priority))
+        form.append('name', String(document.getElementById('media-name').value || '').trim())
+        if (Number.isInteger(selectedCampaignId) && selectedCampaignId > 0) {
+          form.append('campaignId', String(selectedCampaignId))
         }
+        if (protectSlideInput && protectSlideInput.checked) form.append('protectSlide', '1')
 
         form.append('mediaFile', fileInput.files[0])
 
@@ -778,9 +1169,9 @@
           : campaignSelect.value
         event.target.reset()
         campaignSelect.value = selectedAfterUpload
-        campaignCreateWrap.classList.add('hidden')
+        closeCampaignModal()
         await loadCampaigns()
-        if (selectedAfterUpload && selectedAfterUpload !== '__create__') {
+        if (selectedAfterUpload) {
           selectedCampaignViewId = Number(selectedAfterUpload)
         }
         await loadCampaignSlides()
@@ -794,59 +1185,112 @@
     groupSelect.addEventListener('change', async (event) => {
       selectedGroupId = Number(event.target.value)
       storeGroupId(selectedGroupId)
+      closeAllModals()
       await loadAllData()
     })
 
     campaignSelect.addEventListener('change', () => {
       const selectedId = Number(campaignSelect.value)
       selectedCampaignViewId = Number.isInteger(selectedId) && selectedId > 0 ? selectedId : null
-      toggleCampaignCreateForm()
+      if (campaignSelect.value !== '') {
+        if (protectSlideInput) protectSlideInput.checked = false
+      }
       renderCampaignList()
       loadCampaignSlides()
     })
 
-    document.getElementById('default-image-form').addEventListener('submit', async (event) => {
-      event.preventDefault()
-      if (!selectedGroupId) return
-
-      const input = document.getElementById('default-image-input')
-      if (!input.files || !input.files[0]) return
-
-      const form = new FormData()
-      form.append('defaultImage', input.files[0])
-      form.append('groupId', String(selectedGroupId))
-
-      const res = await fetch('/media/default-image', {
-        method: 'POST',
-        body: form,
-        credentials: 'same-origin'
-      })
-
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
-        alert(payload.error || 'Falha ao salvar imagem padrao')
-        return
-      }
-
-      await loadSettings()
-      input.value = ''
+    openCampaignModalBtn.addEventListener('click', () => {
+      openCampaignModal()
     })
 
-    document.getElementById('remove-default-image-btn').addEventListener('click', async () => {
-      if (!selectedGroupId) return
-      if (!confirm('Deseja remover a imagem padrao deste grupo?')) return
+    closeCampaignModalBtn.addEventListener('click', closeCampaignModal)
+    cancelCampaignModalBtn.addEventListener('click', closeCampaignModal)
 
-      try {
-        await requestJson('/media/default-image/remove', {
+    saveCampaignModalBtn.addEventListener('click', createCampaignFromModal)
+
+    campaignModal.addEventListener('click', (event) => {
+      if (event.target === campaignModal) {
+        closeCampaignModal()
+      }
+    })
+
+    openUserModalBtn.addEventListener('click', () => {
+      openModal(userModal)
+      setTimeout(() => document.getElementById('new-username').focus(), 30)
+    })
+
+    openGroupModalBtn.addEventListener('click', () => {
+      openModal(groupModal)
+      setTimeout(() => document.getElementById('new-group-name').focus(), 30)
+    })
+
+    closeUserModalBtn.addEventListener('click', () => closeModal(userModal))
+    closeGroupModalBtn.addEventListener('click', () => closeModal(groupModal))
+    cancelUserModalBtn.addEventListener('click', () => closeModal(userModal))
+    cancelGroupModalBtn.addEventListener('click', () => closeModal(groupModal))
+
+    userModal.addEventListener('click', (event) => {
+      if (event.target === userModal) closeModal(userModal)
+    })
+
+    groupModal.addEventListener('click', (event) => {
+      if (event.target === groupModal) closeModal(groupModal)
+    })
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeAllModals()
+      }
+    })
+
+    const defaultImageForm = document.getElementById('default-image-form')
+    if (defaultImageForm) {
+      defaultImageForm.addEventListener('submit', async (event) => {
+        event.preventDefault()
+        if (!selectedGroupId) return
+
+        const input = document.getElementById('default-image-input')
+        if (!input || !input.files || !input.files[0]) return
+
+        const form = new FormData()
+        form.append('defaultImage', input.files[0])
+        form.append('groupId', String(selectedGroupId))
+
+        const res = await fetch('/media/default-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ groupId: selectedGroupId })
+          body: form,
+          credentials: 'same-origin'
         })
+
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}))
+          alert(payload.error || 'Falha ao salvar imagem padrao')
+          return
+        }
+
         await loadSettings()
-      } catch (error) {
-        alert(error.message)
-      }
-    })
+        input.value = ''
+      })
+    }
+
+    const removeDefaultImageBtn = document.getElementById('remove-default-image-btn')
+    if (removeDefaultImageBtn) {
+      removeDefaultImageBtn.addEventListener('click', async () => {
+        if (!selectedGroupId) return
+        if (!confirm('Deseja remover a imagem padrao deste grupo?')) return
+
+        try {
+          await requestJson('/media/default-image/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ groupId: selectedGroupId })
+          })
+          await loadSettings()
+        } catch (error) {
+          alert(error.message)
+        }
+      })
+    }
 
     const mediaInput = document.getElementById('media-file')
     if (mediaInput) {
@@ -857,8 +1301,12 @@
     window.addEventListener('offline', checkServerStatus)
     setInterval(checkServerStatus, 5000)
 
-    bootstrap()
-    checkServerStatus()
+    ;(async () => {
+      await loadRuntimeConfig()
+      setInterval(autoRefreshAdmin, autoRefreshMs)
+      await bootstrap()
+      checkServerStatus()
+    })()
   </script>
 </body>
 

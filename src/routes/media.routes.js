@@ -108,6 +108,22 @@ async function loadPlaylistByGroup(groupId) {
   return rows.map(mapSlide)
 }
 
+async function resolvePublicGroupId(rawGroupId) {
+  const db = await getDb()
+  const groupId = Number(rawGroupId)
+  if (Number.isInteger(groupId) && groupId > 0) {
+    const group = await db.get('SELECT id FROM groups WHERE id = ?', [groupId])
+    if (group) return group.id
+  }
+  const fallback = await db.get('SELECT id FROM groups ORDER BY display_order, id LIMIT 1')
+  if (!fallback) {
+    const error = new Error('Nenhum grupo cadastrado')
+    error.status = 500
+    throw error
+  }
+  return fallback.id
+}
+
 function getCampaignStatus(startsAt, endsAt, enabled) {
   if (!enabled) return 'inativa'
   const now = Date.now()
@@ -138,10 +154,92 @@ async function resolveActiveCampaign(db, groupId) {
   return active || null
 }
 
+async function buildActivePayload(groupId) {
+  const db = await getDb()
+  const activeCampaign = await resolveActiveCampaign(db, groupId)
+  const coverRows = await db.all(
+    `
+    SELECT id, campaign_id, type, name, src, duration, is_locked
+    FROM slides
+    WHERE group_id = ? AND campaign_id IS NULL
+    ORDER BY position, id
+    `,
+    [groupId]
+  )
+
+  let rows = []
+  if (activeCampaign) {
+    rows = await db.all(
+      `
+      SELECT id, campaign_id, type, name, src, duration, is_locked
+      FROM slides
+      WHERE group_id = ? AND campaign_id = ?
+      ORDER BY position, id
+      `,
+      [groupId, activeCampaign.id]
+    )
+  } else {
+    rows = []
+  }
+
+  return {
+    campaign: activeCampaign
+      ? {
+          id: activeCampaign.id,
+          name: activeCampaign.name
+        }
+      : null,
+    coverSlides: coverRows.map(mapSlide),
+    slides: rows.map(mapSlide)
+  }
+}
+
 async function emitGroupUpdate(req, eventName, groupId, payload = {}) {
   const io = req.app.get('io')
   io.emit(eventName, { groupId, ...payload })
 }
+
+router.get('/runtime-config', (req, res) => {
+  const raw = Number(process.env.AUTO_REFRESH_MS)
+  const autoRefreshMs = Number.isFinite(raw) ? Math.max(5000, Math.min(300000, raw)) : 15000
+  return res.json({ autoRefreshMs })
+})
+
+router.get('/public/groups', async (req, res, next) => {
+  try {
+    return res.json(await listAllGroups())
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.get('/public/settings', async (req, res, next) => {
+  try {
+    const groupId = await resolvePublicGroupId(req.query.groupId)
+    const db = await getDb()
+    const group = await db.get(
+      'SELECT id, name, background, default_image FROM groups WHERE id = ?',
+      [groupId]
+    )
+    return res.json({
+      groupId: group.id,
+      groupName: group.name,
+      background: group.background || '#ffffff',
+      defaultImage: group.default_image || null
+    })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.get('/public/playlist/active', async (req, res, next) => {
+  try {
+    const groupId = await resolvePublicGroupId(req.query.groupId)
+    return res.json(await buildActivePayload(groupId))
+  } catch (error) {
+    return next(error)
+  }
+})
 
 router.get('/groups', async (req, res, next) => {
   try {
@@ -211,41 +309,7 @@ router.get('/playlist', async (req, res, next) => {
 router.get('/playlist/active', async (req, res, next) => {
   try {
     const groupId = await resolveGroupId(req)
-    const db = await getDb()
-    const activeCampaign = await resolveActiveCampaign(db, groupId)
-
-    let rows = []
-    if (activeCampaign) {
-      rows = await db.all(
-        `
-        SELECT id, campaign_id, type, name, src, duration, is_locked
-        FROM slides
-        WHERE group_id = ? AND campaign_id = ?
-        ORDER BY position, id
-        `,
-        [groupId, activeCampaign.id]
-      )
-    } else {
-      rows = await db.all(
-        `
-        SELECT id, campaign_id, type, name, src, duration, is_locked
-        FROM slides
-        WHERE group_id = ? AND campaign_id IS NULL
-        ORDER BY position, id
-        `,
-        [groupId]
-      )
-    }
-
-    return res.json({
-      campaign: activeCampaign
-        ? {
-            id: activeCampaign.id,
-            name: activeCampaign.name
-          }
-        : null,
-      slides: rows.map(mapSlide)
-    })
+    return res.json(await buildActivePayload(groupId))
   } catch (error) {
     return next(error)
   }
@@ -308,6 +372,50 @@ router.post('/campaigns', requireAuth, express.json(), async (req, res, next) =>
   }
 })
 
+router.post('/campaigns/update', requireAuth, express.json(), async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const campaignId = Number(req.body?.campaignId)
+    const name = String(req.body?.name || '').trim()
+    const startsAt = String(req.body?.startsAt || '').trim()
+    const endsAt = String(req.body?.endsAt || '').trim()
+    const priority = Number(req.body?.priority || 1)
+
+    if (!Number.isInteger(campaignId) || campaignId <= 0) {
+      return res.status(400).json({ error: 'Campanha invalida' })
+    }
+    if (!name || !startsAt || !endsAt) {
+      return res.status(400).json({ error: 'Nome, inicio e fim sao obrigatorios' })
+    }
+    if (new Date(startsAt).getTime() >= new Date(endsAt).getTime()) {
+      return res.status(400).json({ error: 'Data/hora de fim deve ser maior que a de inicio' })
+    }
+
+    const db = await getDb()
+    const campaign = await db.get(
+      'SELECT id FROM campaigns WHERE id = ? AND group_id = ?',
+      [campaignId, groupId]
+    )
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campanha nao encontrada' })
+    }
+
+    await db.run(
+      `
+      UPDATE campaigns
+      SET name = ?, starts_at = ?, ends_at = ?, priority = ?
+      WHERE id = ? AND group_id = ?
+      `,
+      [name, startsAt, endsAt, Math.max(1, priority), campaignId, groupId]
+    )
+
+    await emitGroupUpdate(req, 'playlist:update', groupId)
+    return res.json({ ok: true })
+  } catch (error) {
+    return next(error)
+  }
+})
+
 router.post('/campaigns/delete', requireAuth, express.json(), async (req, res, next) => {
   try {
     const groupId = await resolveGroupId(req, { forWrite: true })
@@ -325,11 +433,41 @@ router.post('/campaigns/delete', requireAuth, express.json(), async (req, res, n
       return res.status(404).json({ error: 'Campanha nao encontrada' })
     }
 
-    await db.run('UPDATE slides SET campaign_id = NULL WHERE group_id = ? AND campaign_id = ?', [
-      groupId,
-      campaignId
-    ])
-    await db.run('DELETE FROM campaigns WHERE id = ?', [campaignId])
+    const slides = await db.all(
+      `
+      SELECT id, src
+      FROM slides
+      WHERE group_id = ? AND campaign_id = ?
+      `,
+      [groupId, campaignId]
+    )
+
+    await db.run('BEGIN TRANSACTION')
+    try {
+      await db.run('DELETE FROM slides WHERE group_id = ? AND campaign_id = ?', [groupId, campaignId])
+      await db.run('DELETE FROM campaigns WHERE id = ?', [campaignId])
+      await db.run('COMMIT')
+    } catch (error) {
+      await db.run('ROLLBACK')
+      throw error
+    }
+
+    for (const slide of slides) {
+      const refs = await db.get(
+        'SELECT COUNT(*) as total FROM slides WHERE src = ?',
+        [slide.src]
+      )
+      if (Number(refs?.total || 0) > 0) continue
+
+      const filePath = path.resolve(
+        __dirname,
+        '..',
+        slide.src.replace('/uploads', 'uploads')
+      )
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath)
+      }
+    }
 
     await emitGroupUpdate(req, 'playlist:update', groupId)
     return res.json({ ok: true })
@@ -341,29 +479,43 @@ router.post('/campaigns/delete', requireAuth, express.json(), async (req, res, n
 router.get('/campaigns/slides', requireAuth, async (req, res, next) => {
   try {
     const groupId = await resolveGroupId(req, { forWrite: true })
-    const campaignId = Number(req.query?.campaignId)
-    if (!Number.isInteger(campaignId) || campaignId <= 0) {
+    const campaignRaw = String(req.query?.campaignId || '').trim()
+    const isBaseScope = campaignRaw === 'base'
+    const campaignId = Number(campaignRaw)
+    if (!isBaseScope && (!Number.isInteger(campaignId) || campaignId <= 0)) {
       return res.status(400).json({ error: 'Campanha invalida' })
     }
 
     const db = await getDb()
-    const campaign = await db.get(
-      'SELECT id FROM campaigns WHERE id = ? AND group_id = ?',
-      [campaignId, groupId]
-    )
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campanha nao encontrada' })
+    if (!isBaseScope) {
+      const campaign = await db.get(
+        'SELECT id FROM campaigns WHERE id = ? AND group_id = ?',
+        [campaignId, groupId]
+      )
+      if (!campaign) {
+        return res.status(404).json({ error: 'Campanha nao encontrada' })
+      }
     }
 
-    const rows = await db.all(
-      `
-      SELECT id, campaign_id, type, name, src, duration, is_locked
-      FROM slides
-      WHERE group_id = ? AND campaign_id = ?
-      ORDER BY position, id
-      `,
-      [groupId, campaignId]
-    )
+    const rows = isBaseScope
+      ? await db.all(
+          `
+          SELECT id, campaign_id, type, name, src, duration, is_locked
+          FROM slides
+          WHERE group_id = ? AND campaign_id IS NULL
+          ORDER BY position, id
+          `,
+          [groupId]
+        )
+      : await db.all(
+          `
+          SELECT id, campaign_id, type, name, src, duration, is_locked
+          FROM slides
+          WHERE group_id = ? AND campaign_id = ?
+          ORDER BY position, id
+          `,
+          [groupId, campaignId]
+        )
 
     return res.json(rows.map(mapSlide))
   } catch (error) {
@@ -396,8 +548,8 @@ router.post('/campaigns/slides/update', requireAuth, express.json(), async (req,
     if (!slide) {
       return res.status(404).json({ error: 'Slide nao encontrado' })
     }
-    if (!slide.campaign_id) {
-      return res.status(400).json({ error: 'Slide sem campanha nao pode ser editado aqui' })
+    if (req.user.role !== 'master' && !slide.campaign_id) {
+      return res.status(403).json({ error: 'Somente master pode editar capas do grupo' })
     }
     if (req.user.role !== 'master' && Number(slide.is_locked) === 1) {
       return res.status(403).json({
@@ -435,8 +587,8 @@ router.post('/campaigns/slides/delete', requireAuth, express.json(), async (req,
     if (!slide) {
       return res.status(404).json({ error: 'Slide nao encontrado' })
     }
-    if (!slide.campaign_id) {
-      return res.status(400).json({ error: 'Slide sem campanha nao pode ser excluido aqui' })
+    if (req.user.role !== 'master' && !slide.campaign_id) {
+      return res.status(403).json({ error: 'Somente master pode excluir capas do grupo' })
     }
     if (req.user.role !== 'master' && Number(slide.is_locked) === 1) {
       return res.status(403).json({
@@ -459,10 +611,13 @@ router.post('/campaigns/slides/delete', requireAuth, express.json(), async (req,
       `
       SELECT id
       FROM slides
-      WHERE group_id = ? AND campaign_id = ?
+      WHERE group_id = ? AND (
+        (campaign_id = ?)
+        OR (campaign_id IS NULL AND ? IS NULL)
+      )
       ORDER BY position, id
       `,
-      [groupId, slide.campaign_id]
+      [groupId, slide.campaign_id, slide.campaign_id]
     )
     for (let position = 0; position < remaining.length; position += 1) {
       await db.run('UPDATE slides SET position = ? WHERE id = ?', [
@@ -473,6 +628,76 @@ router.post('/campaigns/slides/delete', requireAuth, express.json(), async (req,
 
     await emitGroupUpdate(req, 'playlist:update', groupId)
     return res.json({ ok: true })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post('/campaigns/slides/reorder', requireAuth, express.json(), async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const slideId = Number(req.body?.slideId)
+    const dir = Number(req.body?.dir)
+    if (!Number.isInteger(slideId) || slideId <= 0 || !Number.isInteger(dir)) {
+      return res.status(400).json({ error: 'Dados invalidos para reordenacao' })
+    }
+
+    const db = await getDb()
+    const current = await db.get(
+      `
+      SELECT id, campaign_id, position, is_locked
+      FROM slides
+      WHERE id = ? AND group_id = ?
+      `,
+      [slideId, groupId]
+    )
+    if (!current) {
+      return res.status(404).json({ error: 'Slide nao encontrado' })
+    }
+    if (req.user.role !== 'master' && !current.campaign_id) {
+      return res.status(403).json({ error: 'Somente master pode ordenar capas do grupo' })
+    }
+
+    const scopeRows = await db.all(
+      `
+      SELECT id, position, is_locked
+      FROM slides
+      WHERE group_id = ? AND (
+        (campaign_id = ?)
+        OR (campaign_id IS NULL AND ? IS NULL)
+      )
+      ORDER BY position, id
+      `,
+      [groupId, current.campaign_id, current.campaign_id]
+    )
+    const index = scopeRows.findIndex((row) => row.id === current.id)
+    const nextIndex = index + dir
+    if (index < 0 || nextIndex < 0 || nextIndex >= scopeRows.length) {
+      return res.json({ ok: true, changed: false })
+    }
+
+    const target = scopeRows[nextIndex]
+    if (
+      req.user.role !== 'master' &&
+      (Number(current.is_locked) === 1 || Number(target.is_locked) === 1)
+    ) {
+      return res.status(403).json({
+        error: 'Slide protegido pelo master nao pode ter posicao alterada'
+      })
+    }
+
+    await db.run('BEGIN TRANSACTION')
+    try {
+      await db.run('UPDATE slides SET position = ? WHERE id = ?', [target.position, current.id])
+      await db.run('UPDATE slides SET position = ? WHERE id = ?', [current.position, target.id])
+      await db.run('COMMIT')
+    } catch (error) {
+      await db.run('ROLLBACK')
+      throw error
+    }
+
+    await emitGroupUpdate(req, 'playlist:update', groupId)
+    return res.json({ ok: true, changed: true })
   } catch (error) {
     return next(error)
   }
@@ -495,6 +720,10 @@ router.post(
 
       const db = await getDb()
       const duration = Math.max(1000, Number(req.body?.duration || 5) * 1000)
+      const inputName = String(req.body?.name || '').trim()
+      const shouldLock =
+        req.user.role === 'master' &&
+        (req.body?.protectSlide === '1' || req.body?.protectSlide === 'true')
       const incomingCampaignId = req.body?.campaignId
         ? String(req.body.campaignId).trim()
         : ''
@@ -542,29 +771,42 @@ router.post(
         })
       }
 
-      const positionInfo = campaignId
-        ? await db.get(
-            'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ? AND campaign_id = ?',
-            [groupId, campaignId]
-          )
-        : await db.get(
-            'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ? AND campaign_id IS NULL',
-            [groupId]
-          )
-      const insertPosition = positionInfo.nextPosition
+      const isBaseUpload = !campaignId
+      const lockAsCover = req.user.role === 'master' && isBaseUpload ? true : shouldLock
+      let insertPosition = 0
+
+      if (isBaseUpload && lockAsCover) {
+        await db.run(
+          'UPDATE slides SET position = position + 1 WHERE group_id = ? AND campaign_id IS NULL',
+          [groupId]
+        )
+        insertPosition = 0
+      } else {
+        const positionInfo = campaignId
+          ? await db.get(
+              'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ? AND campaign_id = ?',
+              [groupId, campaignId]
+            )
+          : await db.get(
+              'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ? AND campaign_id IS NULL',
+              [groupId]
+            )
+        insertPosition = positionInfo.nextPosition
+      }
 
       await db.run(
         `
         INSERT INTO slides (group_id, campaign_id, type, name, src, duration, position, is_locked, created_by_user_id)
-        VALUES (?, ?, 'image', ?, ?, ?, ?, 0, ?)
+        VALUES (?, ?, 'image', ?, ?, ?, ?, ?, ?)
         `,
         [
           groupId,
           campaignId,
-          file.originalname,
+          inputName || file.originalname,
           `/uploads/images/${file.filename}`,
           duration,
           insertPosition,
+          lockAsCover ? 1 : 0,
           req.user.id || null
         ]
       )
@@ -774,7 +1016,7 @@ router.post('/reorder', requireAuth, express.json(), async (req, res, next) => {
     const db = await getDb()
     const slides = await db.all(
       `
-      SELECT id, position, is_locked
+      SELECT id, campaign_id, position, is_locked
       FROM slides
       WHERE group_id = ?
       ORDER BY position, id
@@ -792,7 +1034,10 @@ router.post('/reorder', requireAuth, express.json(), async (req, res, next) => {
     if (!current || !target) return res.sendStatus(400)
     if (
       req.user.role !== 'master' &&
-      (Number(current.is_locked) === 1 || Number(target.is_locked) === 1)
+      (Number(current.is_locked) === 1 ||
+        Number(target.is_locked) === 1 ||
+        current.campaign_id == null ||
+        target.campaign_id == null)
     ) {
       return res.status(403).json({
         error: 'Slide protegido pelo master nao pode ter posicao alterada'
@@ -831,7 +1076,7 @@ router.post('/delete', requireAuth, express.json(), async (req, res, next) => {
     const db = await getDb()
     const slides = await db.all(
       `
-      SELECT id, src, is_locked
+      SELECT id, src, campaign_id, is_locked
       FROM slides
       WHERE group_id = ?
       ORDER BY position, id
@@ -840,7 +1085,10 @@ router.post('/delete', requireAuth, express.json(), async (req, res, next) => {
     )
     const item = slides[index]
     if (!item) return res.sendStatus(400)
-    if (req.user.role !== 'master' && Number(item.is_locked) === 1) {
+    if (
+      req.user.role !== 'master' &&
+      (Number(item.is_locked) === 1 || item.campaign_id == null)
+    ) {
       return res.status(403).json({
         error: 'Slide protegido pelo master nao pode ser excluido'
       })

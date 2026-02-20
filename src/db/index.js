@@ -167,24 +167,6 @@ async function seedUsers(db) {
       [masterUser, hashPassword(masterPass)]
     )
   }
-
-  const groups = await db.all('SELECT id, name FROM groups ORDER BY id')
-  for (const group of groups) {
-    const username = group.name.toLowerCase()
-    const existingUser = await db.get(
-      'SELECT id FROM users WHERE username = ?',
-      username
-    )
-    if (!existingUser) {
-      await db.run(
-        `
-        INSERT INTO users (username, password_hash, role, group_id)
-        VALUES (?, ?, 'group_user', ?)
-        `,
-        [username, hashPassword('123456'), group.id]
-      )
-    }
-  }
 }
 
 async function migrateJsonIfNeeded(db) {

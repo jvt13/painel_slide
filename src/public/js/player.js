@@ -1,6 +1,7 @@
 ﻿const socket = io()
 
 const DEFAULT_EMPTY_DURATION = 5000
+const DEFAULT_AUTO_REFRESH_MS = 15000
 const params = new URLSearchParams(window.location.search)
 const forcedGroupId = Number(params.get('groupId'))
 const isSingleGroupMode = Number.isInteger(forcedGroupId) && forcedGroupId > 0
@@ -9,6 +10,9 @@ let groups = []
 let playQueue = []
 let queueIndex = 0
 let slideTimer = null
+let isAutoRefreshing = false
+let autoRefreshMs = DEFAULT_AUTO_REFRESH_MS
+let currentEntryKey = null
 
 const groupPlaylists = new Map()
 const groupSettings = new Map()
@@ -26,6 +30,13 @@ function applyBackground(color) {
 
 function clearContainer() {
   container.innerHTML = ''
+}
+
+function getEntryKey(entry) {
+  if (!entry || !entry.slide) return null
+  const slide = entry.slide
+  if (slide.id) return `${entry.groupId}:${slide.id}`
+  return `${entry.groupId}:${slide.type || 'media'}:${slide.src || slide.name || 'unknown'}`
 }
 
 function clearSlideTimer() {
@@ -57,7 +68,7 @@ setInterval(updateClock, 1000)
 updateClock()
 
 async function loadGroups() {
-  const res = await fetch('/media/groups')
+  const res = await fetch('/media/public/groups')
   const data = await res.json()
   const allGroups = Array.isArray(data) ? data : []
   if (isSingleGroupMode) {
@@ -70,14 +81,22 @@ async function loadGroups() {
 
 async function loadGroupData(groupId) {
   const [playlistRes, settingsRes] = await Promise.all([
-    fetch(`/media/playlist/active?groupId=${groupId}`),
-    fetch(`/media/settings?groupId=${groupId}`, { cache: 'no-store' })
+    fetch(`/media/public/playlist/active?groupId=${groupId}`),
+    fetch(`/media/public/settings?groupId=${groupId}`, { cache: 'no-store' })
   ])
 
   const playlistPayload = await playlistRes.json()
-  const groupPlaylist = Array.isArray(playlistPayload.slides)
-    ? playlistPayload.slides
-    : []
+  const coverSlides = Array.isArray(playlistPayload.coverSlides) ? playlistPayload.coverSlides : []
+  const campaignSlides = Array.isArray(playlistPayload.slides) ? playlistPayload.slides : []
+  const uniqueCoverSlides = []
+  const seenCoverKeys = new Set()
+  for (const slide of coverSlides) {
+    const key = slide && slide.id ? `id:${slide.id}` : `src:${slide?.src || ''}`
+    if (seenCoverKeys.has(key)) continue
+    seenCoverKeys.add(key)
+    uniqueCoverSlides.push(slide)
+  }
+  const groupPlaylist = [...uniqueCoverSlides, ...campaignSlides]
   const settings = await settingsRes.json()
 
   groupPlaylists.set(groupId, Array.isArray(groupPlaylist) ? groupPlaylist : [])
@@ -157,10 +176,16 @@ function showCurrentEntry() {
     clearContainer()
     applyBackground('#ffffff')
     clearSlideTimer()
+    currentEntryKey = null
     return
   }
 
   const entry = playQueue[queueIndex]
+  const nextEntryKey = getEntryKey(entry)
+  if (nextEntryKey && nextEntryKey === currentEntryKey) {
+    return
+  }
+  currentEntryKey = nextEntryKey
   const item = entry.slide
   applyBackground(entry.settings.background)
 
@@ -223,6 +248,35 @@ async function refreshAll() {
   buildPlayQueue()
 }
 
+async function loadRuntimeConfig() {
+  try {
+    const res = await fetch('/media/runtime-config', { cache: 'no-store' })
+    if (!res.ok) return
+    const payload = await res.json().catch(() => ({}))
+    const value = Number(payload?.autoRefreshMs)
+    if (Number.isFinite(value) && value >= 5000) {
+      autoRefreshMs = value
+    }
+  } catch (error) {
+    // keep default value
+  }
+}
+
+async function autoRefreshTick() {
+  if (isAutoRefreshing) return
+  isAutoRefreshing = true
+  try {
+    await refreshAll()
+    const current = playQueue[queueIndex]
+    const currentKey = getEntryKey(current)
+    if (!currentKey || currentKey !== currentEntryKey) {
+      showCurrentEntry()
+    }
+  } finally {
+    isAutoRefreshing = false
+  }
+}
+
 socket.on('playlist:update', async (payload = {}) => {
   if (isSingleGroupMode && payload.groupId && Number(payload.groupId) !== forcedGroupId) return
   await refreshAll()
@@ -241,8 +295,10 @@ socket.on('groups:update', async () => {
 })
 
 async function startPlayer() {
+  await loadRuntimeConfig()
   await refreshAll()
   showCurrentEntry()
+  setInterval(autoRefreshTick, autoRefreshMs)
 }
 
 startPlayer()
