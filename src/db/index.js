@@ -3,8 +3,9 @@ const path = require('path')
 const { open } = require('sqlite')
 const sqlite3 = require('sqlite3')
 const { hashPassword } = require('../utils/security')
+const { getDefaultDbPath } = require('../config/runtime-paths')
 
-const defaultDbPath = path.resolve(__dirname, '..', 'data', 'painel.sqlite')
+const defaultDbPath = getDefaultDbPath()
 let dbPromise = null
 
 function getDbPath() {

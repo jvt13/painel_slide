@@ -2,23 +2,49 @@
   "name": "painel_slide",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/app.js",
+  "bin": "src/app.js",
   "directories": {
     "test": "tests"
   },
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
+    "build:exe:ico": "node scripts/generate-ico.js",
+    "build:exe:patch": "node scripts/patch-sqlite-binding.js",
+    "build:exe:raw": "pkg . --targets node18-win-x64 --out-path dist",
+    "build:exe:native": "node scripts/copy-sqlite-binary.js",
+    "build:exe:iconfile": "node scripts/copy-app-icon.js",
+    "build:exe:shortcut-script": "node scripts/copy-shortcut-script.js",
+    "build:exe:icon": "node scripts/set-exe-icon.js",
+    "build:exe": "npm run build:exe:patch && npm run build:exe:raw && npm run build:exe:native && npm run build:exe:iconfile && npm run build:exe:shortcut-script",
+    "build:exe:with-icon": "npm run build:exe && npm run build:exe:ico && npm run build:exe:icon",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "José",
   "license": "ISC",
   "dependencies": {
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "multer": "^2.0.2",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1",
+    "png-to-ico": "^3.0.1",
+    "rcedit": "^4.0.1"
+  },
+  "pkg": {
+    "scripts": [
+      "src/**/*.js"
+    ],
+    "assets": [
+      "src/admin/**/*",
+      "src/public/**/*",
+      "src/private/**/*",
+      "node_modules/sqlite3/**/*"
+    ]
   }
 }

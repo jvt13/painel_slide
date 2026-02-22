@@ -9,8 +9,17 @@ const { getDb } = require('./db')
 const authRoutes = require('./routes/auth.routes')
 const { attachUser, requireAuth, requireMaster } = require('./middlewares/auth.middleware')
 const mediaRoutes = require('./routes/media.routes')
+const { getUploadsDir } = require('./config/runtime-paths')
 
 const app = express()
+
+process.on('uncaughtException', (error) => {
+  console.error('uncaughtException:', error && error.stack ? error.stack : error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection:', reason)
+})
 
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
@@ -30,7 +39,7 @@ app.use(
 // 🔥 SERVIR UPLOADS
 app.use(
   '/uploads',
-  express.static(path.resolve(__dirname, 'uploads'))
+  express.static(getUploadsDir())
 )
 
 // rotas
@@ -213,4 +222,3 @@ getDb()
     console.error('Falha ao inicializar banco SQLite', error)
     process.exit(1)
   })
-

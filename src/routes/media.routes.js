@@ -5,9 +5,10 @@ const multer = require('multer')
 
 const { getDb } = require('../db')
 const { requireAuth, requireMaster } = require('../middlewares/auth.middleware')
+const { getUploadsDir } = require('../config/runtime-paths')
 
 const router = express.Router()
-const uploadsPath = path.resolve(__dirname, '..', 'uploads')
+const uploadsPath = getUploadsDir()
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {

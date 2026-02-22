@@ -1,4 +1,4 @@
-﻿const socket = io()
+const socket = typeof io === 'function' ? io() : { on: () => {} }
 
 const DEFAULT_EMPTY_DURATION = 5000
 const DEFAULT_AUTO_REFRESH_MS = 15000
@@ -13,12 +13,16 @@ let slideTimer = null
 let isAutoRefreshing = false
 let autoRefreshMs = DEFAULT_AUTO_REFRESH_MS
 let currentEntryKey = null
+let splashVisible = false
+let entryWatchdogTimer = null
 
 const groupPlaylists = new Map()
 const groupSettings = new Map()
 
 const container = document.getElementById('container')
 const playerRoot = document.getElementById('player')
+const splashEl = document.getElementById('startup-splash')
+const splashLogo = document.getElementById('startup-logo')
 
 function applyBackground(color) {
   const resolved = color || '#ffffff'
@@ -30,6 +34,71 @@ function applyBackground(color) {
 
 function clearContainer() {
   container.innerHTML = ''
+}
+
+function hideStartupSplash() {
+  if (!splashEl) return
+  splashVisible = false
+  splashEl.classList.add('hidden')
+}
+
+function getStartupShownFlag() {
+  try {
+    return sessionStorage.getItem('player:startup-logo-shown') === '1'
+  } catch (error) {
+    return false
+  }
+}
+
+function setStartupShownFlag() {
+  try {
+    sessionStorage.setItem('player:startup-logo-shown', '1')
+  } catch (error) {
+    // ignore storage errors (can happen in packaged environments)
+  }
+}
+
+async function showStartupSplashIfNeeded() {
+  if (!splashEl) return
+  const alreadyShown = getStartupShownFlag()
+  if (alreadyShown) {
+    hideStartupSplash()
+    return
+  }
+
+  splashVisible = true
+  splashEl.classList.remove('hidden')
+
+  try {
+    const waitImage = new Promise((resolve) => {
+      if (!splashLogo) return resolve()
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        resolve()
+      }
+      if (splashLogo.complete) {
+        return finish()
+      }
+      splashLogo.onload = finish
+      splashLogo.onerror = finish
+      setTimeout(finish, 1200)
+    })
+
+    // Hard fail-safe: never block player forever in splash mode.
+    const hardTimeout = new Promise((resolve) => setTimeout(resolve, 4000))
+    await Promise.race([
+      (async () => {
+        await waitImage
+        await new Promise((resolve) => setTimeout(resolve, 1800))
+      })(),
+      hardTimeout
+    ])
+    setStartupShownFlag()
+  } finally {
+    hideStartupSplash()
+  }
 }
 
 function getEntryKey(entry) {
@@ -44,6 +113,28 @@ function clearSlideTimer() {
     clearTimeout(slideTimer)
     slideTimer = null
   }
+}
+
+function clearEntryWatchdog() {
+  if (entryWatchdogTimer) {
+    clearTimeout(entryWatchdogTimer)
+    entryWatchdogTimer = null
+  }
+}
+
+function resolveDurationMs(value, fallback = DEFAULT_EMPTY_DURATION) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 1000) return fallback
+  return Math.min(parsed, 24 * 60 * 60 * 1000)
+}
+
+function scheduleEntryWatchdog(expectedMs) {
+  clearEntryWatchdog()
+  const safeMs = resolveDurationMs(expectedMs, DEFAULT_EMPTY_DURATION)
+  // safety net: if any async race clears the main timer, force next slide
+  entryWatchdogTimer = setTimeout(() => {
+    nextEntry()
+  }, safeMs + 3000)
 }
 
 function getGroupSettings(groupId) {
@@ -172,10 +263,12 @@ function buildPlayQueue() {
 }
 
 function showCurrentEntry() {
+  if (splashVisible) return
   if (!playQueue.length) {
     clearContainer()
     applyBackground('#ffffff')
     clearSlideTimer()
+    clearEntryWatchdog()
     currentEntryKey = null
     return
   }
@@ -193,6 +286,7 @@ function showCurrentEntry() {
   clearContainer()
 
   if (!item || !item.src) {
+    clearEntryWatchdog()
     nextEntry()
     return
   }
@@ -202,7 +296,9 @@ function showCurrentEntry() {
     img.src = item.src
     img.onerror = () => nextEntry()
     container.appendChild(img)
-    slideTimer = setTimeout(nextEntry, item.duration || DEFAULT_EMPTY_DURATION)
+    const durationMs = resolveDurationMs(item.duration)
+    slideTimer = setTimeout(nextEntry, durationMs)
+    scheduleEntryWatchdog(durationMs)
     return
   }
 
@@ -215,6 +311,7 @@ function showCurrentEntry() {
     video.onerror = () => nextEntry()
     video.onended = nextEntry
     container.appendChild(video)
+    scheduleEntryWatchdog(resolveDurationMs(item.duration, 10 * 60 * 1000))
     return
   }
 
@@ -224,17 +321,22 @@ function showCurrentEntry() {
     frame.setAttribute('title', item.name || 'PDF')
     frame.onerror = () => nextEntry()
     container.appendChild(frame)
-    slideTimer = setTimeout(nextEntry, item.duration || DEFAULT_EMPTY_DURATION)
+    const durationMs = resolveDurationMs(item.duration)
+    slideTimer = setTimeout(nextEntry, durationMs)
+    scheduleEntryWatchdog(durationMs)
     return
   }
 
-  slideTimer = setTimeout(nextEntry, item.duration || DEFAULT_EMPTY_DURATION)
+  const durationMs = resolveDurationMs(item.duration)
+  slideTimer = setTimeout(nextEntry, durationMs)
+  scheduleEntryWatchdog(durationMs)
 }
 
 function nextEntry() {
   if (!playQueue.length) {
     clearContainer()
     applyBackground('#ffffff')
+    clearEntryWatchdog()
     return
   }
 
@@ -243,9 +345,15 @@ function nextEntry() {
 }
 
 async function refreshAll() {
-  await loadGroups()
-  await preloadAllGroups()
-  buildPlayQueue()
+  try {
+    await loadGroups()
+    await preloadAllGroups()
+    buildPlayQueue()
+  } catch (error) {
+    groups = []
+    playQueue = []
+    queueIndex = 0
+  }
 }
 
 async function loadRuntimeConfig() {
@@ -279,26 +387,47 @@ async function autoRefreshTick() {
 
 socket.on('playlist:update', async (payload = {}) => {
   if (isSingleGroupMode && payload.groupId && Number(payload.groupId) !== forcedGroupId) return
-  await refreshAll()
-  showCurrentEntry()
+  try {
+    await refreshAll()
+    showCurrentEntry()
+  } catch (error) {
+    // ignore transient realtime update errors
+  }
 })
 
 socket.on('settings:update', async (payload = {}) => {
   if (isSingleGroupMode && payload.groupId && Number(payload.groupId) !== forcedGroupId) return
-  await refreshAll()
-  showCurrentEntry()
+  try {
+    await refreshAll()
+    showCurrentEntry()
+  } catch (error) {
+    // ignore transient realtime update errors
+  }
 })
 
 socket.on('groups:update', async () => {
-  await refreshAll()
-  showCurrentEntry()
+  try {
+    await refreshAll()
+    showCurrentEntry()
+  } catch (error) {
+    // ignore transient realtime update errors
+  }
 })
 
 async function startPlayer() {
-  await loadRuntimeConfig()
-  await refreshAll()
-  showCurrentEntry()
+  try {
+    await showStartupSplashIfNeeded()
+  } catch (error) {
+    hideStartupSplash()
+  }
+  try {
+    await loadRuntimeConfig()
+    await refreshAll()
+  } finally {
+    showCurrentEntry()
+  }
   setInterval(autoRefreshTick, autoRefreshMs)
 }
 
 startPlayer()
+
