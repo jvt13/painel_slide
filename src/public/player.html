@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" href="/assets/system-logo.ico" />
     <link rel="stylesheet" href="/player.css" />
     <title>Player</title>
 </head>
@@ -32,11 +33,21 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/player.js"></script>
-      <script>
-        document.addEventListener('click', () => {
-            document.documentElement.requestFullscreen()
-        })
-    </script>
+  <!--
+  <script>
+    // Ativa tela cheia automaticamente ao abrir o player.
+    // Descomente quando quiser habilitar.
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await document.documentElement.requestFullscreen()
+        }
+      } catch (error) {
+        // Alguns navegadores bloqueiam fullscreen sem interação do usuário.
+      }
+    })
+  </script>
+  -->
 </body>
 
 
