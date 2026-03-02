@@ -110,7 +110,7 @@
           <button class="btn ghost" type="button" onclick="refreshPlayerPreview()">Atualizar</button>
         </div>
         <p id="running-campaign" class="helper">Carregando campanha em execucao...</p>
-        <iframe id="player-preview" class="player-preview" src="/player"></iframe>
+        <iframe id="player-preview" class="player-preview" src="/player?preview=1"></iframe>
       </section>
 
       <section class="card settings hidden" id="settings-card">
@@ -501,6 +501,7 @@
       await Promise.all([loadSettings(), loadCampaigns(), loadRunningCampaign()])
       refreshPlayerPreview()
       if (currentUser && currentUser.role === 'master') {
+        await loadRuntimeConfig()
         await refreshUsersAndGroups()
         await loadGroupOrder()
       }
@@ -510,7 +511,11 @@
       if (!currentUser || !selectedGroupId || isAutoRefreshingAdmin) return
       isAutoRefreshingAdmin = true
       try {
-        await Promise.all([loadCampaigns(), loadRunningCampaign()])
+        const tasks = [loadCampaigns(), loadRunningCampaign()]
+        if (currentUser.role === 'master') {
+          tasks.push(loadRuntimeConfig())
+        }
+        await Promise.all(tasks)
       } catch (error) {
         // ignore transient network errors in automatic refresh
       } finally {
@@ -899,7 +904,7 @@
     function refreshPlayerPreview() {
       if (!selectedGroupId) return
       const frame = document.getElementById('player-preview')
-      frame.src = `/player?groupId=${selectedGroupId}&_=${Date.now()}`
+      frame.src = `/player?preview=1&groupId=${selectedGroupId}&_=${Date.now()}`
     }
 
     async function saveSettings() {

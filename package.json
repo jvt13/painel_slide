@@ -16,8 +16,10 @@
     "build:exe:native": "node scripts/copy-sqlite-binary.js",
     "build:exe:iconfile": "node scripts/copy-app-icon.js",
     "build:exe:shortcut-script": "node scripts/copy-shortcut-script.js",
+    "build:exe:kiosk-script": "node scripts/copy-kiosk-script.js",
+    "build:exe:force-f11-assets": "node scripts/copy-force-f11-assets.js",
     "build:exe:icon": "node scripts/set-exe-icon.js",
-    "build:exe": "npm run build:exe:patch && npm run build:exe:raw && npm run build:exe:native && npm run build:exe:iconfile && npm run build:exe:shortcut-script",
+    "build:exe": "npm run build:exe:patch && npm run build:exe:raw && npm run build:exe:native && npm run build:exe:iconfile && npm run build:exe:shortcut-script && npm run build:exe:kiosk-script && npm run build:exe:force-f11-assets",
     "build:exe:with-icon": "npm run build:exe && npm run build:exe:ico && npm run build:exe:icon",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -26,7 +28,9 @@
   "dependencies": {
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
+    "node-fetch": "^2.7.0",
     "socket.io": "^4.8.3",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7"

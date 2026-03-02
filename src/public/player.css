@@ -37,6 +37,24 @@ html, body {
   object-fit: contain;
 }
 
+.player-status {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 120;
+  max-width: calc(100vw - 24px);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(34, 0, 0, 0.78);
+  color: #ffd6d6;
+  font-size: 13px;
+  border: 1px solid rgba(255, 120, 120, 0.45);
+}
+
+.player-status.hidden {
+  display: none;
+}
+
 /* LOGO */
 #logo {
   position: absolute;

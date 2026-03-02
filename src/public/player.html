@@ -14,6 +14,7 @@
     <div id="startup-splash" class="startup-splash hidden">
       <img id="startup-logo" src="/assets/system-logo.png" alt="Logo do sistema" />
     </div>
+    <div id="player-status" class="player-status hidden"></div>
 
     <!-- LOGO -->
     <!--<div id="logo">
@@ -33,21 +34,6 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/player.js"></script>
-  <!--
-  <script>
-    // Ativa tela cheia automaticamente ao abrir o player.
-    // Descomente quando quiser habilitar.
-    document.addEventListener('DOMContentLoaded', async () => {
-      try {
-        if (!document.fullscreenElement) {
-          await document.documentElement.requestFullscreen()
-        }
-      } catch (error) {
-        // Alguns navegadores bloqueiam fullscreen sem interação do usuário.
-      }
-    })
-  </script>
-  -->
 </body>
 
 

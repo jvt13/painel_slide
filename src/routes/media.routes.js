@@ -200,10 +200,14 @@ async function emitGroupUpdate(req, eventName, groupId, payload = {}) {
   io.emit(eventName, { groupId, ...payload })
 }
 
-router.get('/runtime-config', (req, res) => {
-  const raw = Number(process.env.AUTO_REFRESH_MS)
-  const autoRefreshMs = Number.isFinite(raw) ? Math.max(5000, Math.min(300000, raw)) : 15000
-  return res.json({ autoRefreshMs })
+router.get('/runtime-config', async (req, res, next) => {
+  try {
+    const raw = Number(process.env.AUTO_REFRESH_MS)
+    const autoRefreshMs = Number.isFinite(raw) ? Math.max(5000, Math.min(300000, raw)) : 15000
+    return res.json({ autoRefreshMs })
+  } catch (error) {
+    return next(error)
+  }
 })
 
 router.get('/public/groups', async (req, res, next) => {

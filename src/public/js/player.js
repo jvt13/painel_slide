@@ -5,6 +5,7 @@ const DEFAULT_AUTO_REFRESH_MS = 15000
 const params = new URLSearchParams(window.location.search)
 const forcedGroupId = Number(params.get('groupId'))
 const isSingleGroupMode = Number.isInteger(forcedGroupId) && forcedGroupId > 0
+const isManagedPlayerWindow = params.get('managed') === '1'
 
 let groups = []
 let playQueue = []
@@ -15,6 +16,7 @@ let autoRefreshMs = DEFAULT_AUTO_REFRESH_MS
 let currentEntryKey = null
 let splashVisible = false
 let entryWatchdogTimer = null
+let offlineFailures = 0
 
 const groupPlaylists = new Map()
 const groupSettings = new Map()
@@ -23,6 +25,45 @@ const container = document.getElementById('container')
 const playerRoot = document.getElementById('player')
 const splashEl = document.getElementById('startup-splash')
 const splashLogo = document.getElementById('startup-logo')
+const playerStatusEl = document.getElementById('player-status')
+
+function setPlayerStatus(message) {
+  if (!playerStatusEl) return
+  if (!message) {
+    playerStatusEl.classList.add('hidden')
+    playerStatusEl.textContent = ''
+    return
+  }
+  playerStatusEl.textContent = message
+  playerStatusEl.classList.remove('hidden')
+}
+
+function handleOfflineFailure(reason) {
+  offlineFailures += 1
+  if (!isManagedPlayerWindow) return
+  if (offlineFailures < 2) return
+  try {
+    window.close()
+  } catch (error) {
+    // ignore
+  }
+}
+
+async function fetchJsonOrThrow(url, options = {}) {
+  const res = await fetch(url, options)
+  const text = await res.text()
+  let payload = null
+  try {
+    payload = text ? JSON.parse(text) : null
+  } catch (error) {
+    payload = null
+  }
+  if (!res.ok) {
+    const detail = payload && payload.error ? ` - ${payload.error}` : ''
+    throw new Error(`Falha ${res.status} em ${url}${detail}`)
+  }
+  return payload
+}
 
 function applyBackground(color) {
   const resolved = color || '#ffffff'
@@ -159,8 +200,7 @@ setInterval(updateClock, 1000)
 updateClock()
 
 async function loadGroups() {
-  const res = await fetch('/media/public/groups')
-  const data = await res.json()
+  const data = await fetchJsonOrThrow('/media/public/groups')
   const allGroups = Array.isArray(data) ? data : []
   if (isSingleGroupMode) {
     const selectedGroup = allGroups.find((group) => group.id === forcedGroupId)
@@ -171,12 +211,11 @@ async function loadGroups() {
 }
 
 async function loadGroupData(groupId) {
-  const [playlistRes, settingsRes] = await Promise.all([
-    fetch(`/media/public/playlist/active?groupId=${groupId}`),
-    fetch(`/media/public/settings?groupId=${groupId}`, { cache: 'no-store' })
+  const [playlistPayload, settings] = await Promise.all([
+    fetchJsonOrThrow(`/media/public/playlist/active?groupId=${groupId}`),
+    fetchJsonOrThrow(`/media/public/settings?groupId=${groupId}`, { cache: 'no-store' })
   ])
 
-  const playlistPayload = await playlistRes.json()
   const coverSlides = Array.isArray(playlistPayload.coverSlides) ? playlistPayload.coverSlides : []
   const campaignSlides = Array.isArray(playlistPayload.slides) ? playlistPayload.slides : []
   const uniqueCoverSlides = []
@@ -188,8 +227,6 @@ async function loadGroupData(groupId) {
     uniqueCoverSlides.push(slide)
   }
   const groupPlaylist = [...uniqueCoverSlides, ...campaignSlides]
-  const settings = await settingsRes.json()
-
   groupPlaylists.set(groupId, Array.isArray(groupPlaylist) ? groupPlaylist : [])
   groupSettings.set(groupId, {
     background: settings.background || '#ffffff',
@@ -345,22 +382,16 @@ function nextEntry() {
 }
 
 async function refreshAll() {
-  try {
-    await loadGroups()
-    await preloadAllGroups()
-    buildPlayQueue()
-  } catch (error) {
-    groups = []
-    playQueue = []
-    queueIndex = 0
-  }
+  await loadGroups()
+  await preloadAllGroups()
+  buildPlayQueue()
+  setPlayerStatus('')
+  offlineFailures = 0
 }
 
 async function loadRuntimeConfig() {
   try {
-    const res = await fetch('/media/runtime-config', { cache: 'no-store' })
-    if (!res.ok) return
-    const payload = await res.json().catch(() => ({}))
+    const payload = await fetchJsonOrThrow('/media/runtime-config', { cache: 'no-store' })
     const value = Number(payload?.autoRefreshMs)
     if (Number.isFinite(value) && value >= 5000) {
       autoRefreshMs = value
@@ -380,6 +411,9 @@ async function autoRefreshTick() {
     if (!currentKey || currentKey !== currentEntryKey) {
       showCurrentEntry()
     }
+  } catch (error) {
+    setPlayerStatus(error.message || 'Falha no auto refresh do player')
+    handleOfflineFailure(error.message)
   } finally {
     isAutoRefreshing = false
   }
@@ -391,7 +425,8 @@ socket.on('playlist:update', async (payload = {}) => {
     await refreshAll()
     showCurrentEntry()
   } catch (error) {
-    // ignore transient realtime update errors
+    setPlayerStatus(error.message || 'Falha ao atualizar playlist')
+    handleOfflineFailure(error.message)
   }
 })
 
@@ -401,7 +436,8 @@ socket.on('settings:update', async (payload = {}) => {
     await refreshAll()
     showCurrentEntry()
   } catch (error) {
-    // ignore transient realtime update errors
+    setPlayerStatus(error.message || 'Falha ao atualizar configuracoes')
+    handleOfflineFailure(error.message)
   }
 })
 
@@ -410,8 +446,26 @@ socket.on('groups:update', async () => {
     await refreshAll()
     showCurrentEntry()
   } catch (error) {
-    // ignore transient realtime update errors
+    setPlayerStatus(error.message || 'Falha ao atualizar grupos')
+    handleOfflineFailure(error.message)
   }
+})
+
+socket.on('license:update', (payload = {}) => {
+  const status = String(payload.status || '')
+  if (status === 'approved') {
+    return
+  }
+  // Forca nova requisicao da rota /player para que o license guard renderize a tela bloqueada.
+  window.location.reload()
+})
+
+socket.on('disconnect', () => {
+  handleOfflineFailure('socket disconnect')
+})
+
+socket.on('connect_error', () => {
+  handleOfflineFailure('socket connect error')
 })
 
 async function startPlayer() {
@@ -423,6 +477,9 @@ async function startPlayer() {
   try {
     await loadRuntimeConfig()
     await refreshAll()
+  } catch (error) {
+    setPlayerStatus(error.message || 'Falha ao carregar dados do player')
+    handleOfflineFailure(error.message)
   } finally {
     showCurrentEntry()
   }
@@ -430,4 +487,5 @@ async function startPlayer() {
 }
 
 startPlayer()
+
 

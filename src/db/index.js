@@ -73,6 +73,11 @@ async function createSchema(db) {
       FOREIGN KEY(group_id) REFERENCES groups(id),
       FOREIGN KEY(created_by_user_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `)
 }
 
@@ -132,6 +137,15 @@ async function ensureCampaignsTable(db) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(group_id) REFERENCES groups(id),
       FOREIGN KEY(created_by_user_id) REFERENCES users(id)
+    );
+  `)
+}
+
+async function ensureAppSettingsTable(db) {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
   `)
 }
@@ -234,6 +248,7 @@ async function initializeDb() {
   await ensureSlideProtectionColumns(db)
   await ensureSlideCampaignColumn(db)
   await ensureCampaignsTable(db)
+  await ensureAppSettingsTable(db)
   await seedGroups(db)
   await seedUsers(db)
   await migrateJsonIfNeeded(db)
