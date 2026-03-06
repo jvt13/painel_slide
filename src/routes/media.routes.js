@@ -457,23 +457,6 @@ router.post('/campaigns/delete', requireAuth, express.json(), async (req, res, n
       throw error
     }
 
-    for (const slide of slides) {
-      const refs = await db.get(
-        'SELECT COUNT(*) as total FROM slides WHERE src = ?',
-        [slide.src]
-      )
-      if (Number(refs?.total || 0) > 0) continue
-
-      const filePath = path.resolve(
-        __dirname,
-        '..',
-        slide.src.replace('/uploads', 'uploads')
-      )
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath)
-      }
-    }
-
     await emitGroupUpdate(req, 'playlist:update', groupId)
     return res.json({ ok: true })
   } catch (error) {
@@ -707,6 +690,116 @@ router.post('/campaigns/slides/reorder', requireAuth, express.json(), async (req
     return next(error)
   }
 })
+
+
+// rota API externa para cadastro de imagem de campanha
+// - aceita multipart/form-data com campo `mediaFile` contendo o arquivo
+// - outros campos seguem o mesmo formato da interface web (campaignId, campaignName, startsAt, endsAt, priority, duration, name, protectSlide, groupId/group)
+// - é obrigatorio enviar header `x-api-key` (ou campo body apiKey) igual a process.env.API_UPLOAD_KEY
+// - o usuário é simulado como ``master`` para permitir criacao de campanha e bloqueio
+// - retorna JSON semelhante ao endpoint /campaigns/upload
+router.post(
+  '/api/campaigns/upload',
+  upload.single('mediaFile'),
+  async (req, res, next) => {
+    try {
+      const apiKey = req.get('x-api-key') || req.body?.apiKey || ''
+      if (!process.env.API_UPLOAD_KEY || apiKey !== process.env.API_UPLOAD_KEY) {
+        return res.status(403).json({ error: 'API key invalida' })
+      }
+      // simula usuario master
+      req.user = { role: 'master', id: null }
+
+      const groupId = await resolveGroupId(req)
+      const file = req.file
+      if (!file) {
+        return res.status(400).json({ error: 'Selecione uma imagem' })
+      }
+      if (!file.mimetype.startsWith('image')) {
+        return res.status(400).json({ error: 'Somente imagens sao permitidas' })
+      }
+
+      const db = await getDb()
+      const duration = Math.max(1000, Number(req.body?.duration || 5) * 1000)
+      const inputName = String(req.body?.name || '').trim()
+      const shouldLock =
+        req.user.role === 'master' &&
+        (req.body?.protectSlide === '1' || req.body?.protectSlide === 'true')
+      // campanha existente identificada por nome fornecido
+      const campaignName = String(req.body?.campaignName || '').trim()
+      if (!campaignName) {
+        return res.status(400).json({ error: 'Nome da campanha e obrigatorio' })
+      }
+      let campaignId = null
+      const existingCampaign = await db.get(
+        'SELECT id FROM campaigns WHERE lower(name) = lower(?) AND group_id = ?',
+        [campaignName, groupId]
+      )
+      if (existingCampaign) {
+        campaignId = existingCampaign.id
+      } else {
+        // cria nova campanha com periodo padrão (hoje até um ano à frente)
+        const now = new Date().toISOString()
+        const oneYear = new Date()
+        oneYear.setFullYear(oneYear.getFullYear() + 1)
+        const endsAt = oneYear.toISOString()
+        const created = await db.run(
+          `
+          INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, created_by_user_id)
+          VALUES (?, ?, ?, ?, 1, 1, ?)
+          `,
+          [groupId, campaignName, now, endsAt, req.user.id]
+        )
+        campaignId = created.lastID
+      }
+
+      const isBaseUpload = !campaignId
+      const lockAsCover = req.user.role === 'master' && isBaseUpload ? true : shouldLock
+      let insertPosition = 0
+
+      if (isBaseUpload && lockAsCover) {
+        await db.run(
+          'UPDATE slides SET position = position + 1 WHERE group_id = ? AND campaign_id IS NULL',
+          [groupId]
+        )
+        insertPosition = 0
+      } else {
+        const positionInfo = campaignId
+          ? await db.get(
+              'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ? AND campaign_id = ?',
+              [groupId, campaignId]
+            )
+          : await db.get(
+              'SELECT COALESCE(MAX(position), -1) + 1 as nextPosition FROM slides WHERE group_id = ? AND campaign_id IS NULL',
+              [groupId]
+            )
+        insertPosition = positionInfo.nextPosition
+      }
+
+      await db.run(
+        `
+        INSERT INTO slides (group_id, campaign_id, type, name, src, duration, position, is_locked, created_by_user_id)
+        VALUES (?, ?, 'image', ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          groupId,
+          campaignId,
+          inputName || file.originalname,
+          `/uploads/images/${file.filename}`,
+          duration,
+          insertPosition,
+          lockAsCover ? 1 : 0,
+          req.user.id
+        ]
+      )
+
+      await emitGroupUpdate(req, 'playlist:update', groupId)
+      return res.json({ ok: true, campaignId, uploaded: 1 })
+    } catch (error) {
+      return next(error)
+    }
+  }
+)
 
 router.post(
   '/campaigns/upload',

@@ -1,5 +1,5 @@
 {
-  "name": "painel_slide",
+  "name": "VisualLoop",
   "version": "1.0.0",
   "description": "",
   "main": "src/app.js",
@@ -8,8 +8,8 @@
     "test": "tests"
   },
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
+    "start": "scripts\\start.bat",
+    "dev": "scripts\\dev.bat",
     "build:exe:ico": "node scripts/generate-ico.js",
     "build:exe:patch": "node scripts/patch-sqlite-binding.js",
     "build:exe:raw": "pkg . --targets node18-win-x64 --out-path dist",
@@ -48,7 +48,7 @@
       "src/admin/**/*",
       "src/public/**/*",
       "src/private/**/*",
-      "node_modules/sqlite3/**/*"
+      ".env"
     ]
   }
 }

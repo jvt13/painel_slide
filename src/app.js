@@ -2,9 +2,58 @@ const express = require('express')
 const fs = require('fs')
 const path = require('path')
 const { spawn, spawnSync } = require('child_process')
-require('dotenv').config()
+const dotenv = require('dotenv')
 const http = require('http')
 const { Server } = require('socket.io')
+
+function loadEnv() {
+  const candidates = process.pkg
+    ? [
+        path.resolve(path.dirname(process.execPath), '.env'),
+        path.resolve(path.dirname(process.execPath), '..', '.env'),
+        path.resolve(process.cwd(), '.env')
+      ]
+    : [path.resolve(process.cwd(), '.env')]
+
+  for (const envPath of candidates) {
+    if (!fs.existsSync(envPath)) continue
+    dotenv.config({ path: envPath, override: true })
+    return envPath
+  }
+
+  dotenv.config({ override: true })
+  return null
+}
+
+const loadedEnvPath = loadEnv()
+
+if (process.pkg) {
+  // For packaged executables, ensure environment variables are loaded correctly
+  process.env.NODE_ENV = process.env.NODE_ENV || 'production'
+  process.env.LICENSE_API_URL = process.env.LICENSE_API_URL || 'https://production-license-api.com/api/license'
+  // Valores fixos para o executável
+  process.env.LICENSE_API_URL = 'https://license.srv-jvt.com/api/license';
+  process.env.PORT = '3000';
+  process.env.NODE_ENV = 'production';
+  process.env.AUTH_SECRET = 'troque-para-um-segredo-forte';
+  process.env.MASTER_USER = 'master';
+  process.env.MASTER_PASS = 'admin123';
+  process.env.LICENSE_APP_ID = 'painel_slide';
+  process.env.LICENSE_PENDING_POLL_MS = '10000';
+  process.env.LICENSE_CHECK_INTERVAL_MS = '10000';
+  process.env.API_UPLOAD_KEY = 'chv1N9bKq7rXz3uH';
+}
+
+if (!process.env.LICENSE_API_URL) {
+  console.error('[ERROR] LICENSE_API_URL não está definido. Verifique o arquivo .env ou as variáveis de ambiente.');
+  process.exit(1);
+}
+
+// Valores fixos como fallback para evitar problemas em outros ambientes
+process.env.LICENSE_API_URL = process.env.LICENSE_API_URL || 'https://license.srv-jvt.com/api/license';
+process.env.PORT = process.env.PORT || '3000';
+process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+process.env.AUTH_SECRET = process.env.AUTH_SECRET || 'default-secret';
 
 const { getDb } = require('./db')
 const authRoutes = require('./routes/auth.routes')
@@ -19,6 +68,12 @@ const {
 } = require('./services/license.service')
 
 const app = express()
+if (loadedEnvPath) {
+  console.log(`[env] carregado de: ${loadedEnvPath}`)
+} else {
+  console.log('[env] .env nao encontrado; usando variaveis do ambiente/suporte padrao')
+}
+console.log(`[license] LICENSE_API_URL efetiva: ${process.env.LICENSE_API_URL || 'http://localhost:3001/api/license'}`)
 
 process.on('uncaughtException', (error) => {
   console.error('uncaughtException:', error && error.stack ? error.stack : error)
@@ -437,5 +492,3 @@ getDb()
     console.error('Falha ao inicializar banco SQLite', error)
     process.exit(1)
   })
-
-

@@ -1,0 +1,75 @@
+# VisualLoop - Instruções e Resumo do Sistema
+
+## Resumo do Sistema
+
+O sistema desenvolvido, chamado **VisualLoop**, é uma aplicação voltada para a gestão e exibição de campanhas multimídia. Ele foi projetado para funcionar como um painel de controle e um player de mídia, permitindo que os usuários gerenciem campanhas e exibam conteúdos de forma automatizada. A aplicação é construída com tecnologias modernas e é distribuída como um executável para facilitar sua execução em diferentes máquinas sem necessidade de configuração adicional.
+
+---
+
+## Funcionalidades Principais
+
+1. **Administração de Campanhas**:
+   - Interface administrativa para criar, editar e gerenciar campanhas.
+   - Upload de imagens e outros arquivos multimídia associados às campanhas.
+   - Configuração de tempos de exibição e controle de campanhas expiradas.
+
+2. **Player de Mídia**:
+   - Exibição automatizada de campanhas em um player dedicado.
+   - Suporte para execução em tela cheia (modo kiosk) com forçamento de F11.
+   - Configuração de URLs e títulos personalizados para o player.
+
+3. **Gestão de Licenças**:
+   - Integração com uma API de licenças para validação e controle do uso do sistema.
+   - Verificação periódica do status da licença.
+
+4. **Banco de Dados Local**:
+   - Utilização de SQLite para armazenar dados de campanhas, configurações e usuários.
+   - Arquitetura leve e independente de servidores externos.
+
+5. **Configurações Automatizadas**:
+   - Variáveis de ambiente configuráveis para personalizar o comportamento do sistema.
+   - Suporte para execução em diferentes ambientes (desenvolvimento e produção).
+
+6. **Distribuição como Executável**:
+   - Geração de um arquivo `.exe` que encapsula toda a aplicação, incluindo dependências.
+   - Suporte para execução em máquinas Windows sem necessidade de instalação de dependências externas.
+
+---
+
+## Instruções para o Projeto
+
+### 1. **Requisitos do Sistema**
+   - **Sistema Operacional**: Windows 10 ou superior.
+   - **Node.js**: Apenas necessário para desenvolvimento (não para o executável).
+   - **Ferramentas**: `pkg` para gerar o executável.
+
+### 2. **Configuração para Desenvolvimento**
+   - Clone o repositório do projeto.
+   - Instale as dependências com `npm install`.
+   - Configure o arquivo `.env` com as variáveis de ambiente necessárias (baseado no `.env.example`).
+   - Execute o servidor local com `npm run dev`.
+
+### 3. **Geração do Executável**
+   - Certifique-se de que o ícone do executável está no caminho correto (`src/public/assets/icon_256x256.ico`).
+   - Use o comando `npm run build:exe` ou o script `build-exe.bat` para gerar o executável.
+   - O executável será gerado na pasta `dist`.
+
+### 4. **Execução do Sistema**
+   - Para rodar o sistema, basta executar o arquivo `.exe` gerado.
+   - O player será aberto automaticamente em tela cheia, exibindo as campanhas configuradas.
+
+### 5. **Estrutura de Pastas**
+   - **`src/`**: Contém o código-fonte da aplicação.
+   - **`public/`**: Arquivos públicos, como CSS, HTML e ícones.
+   - **`scripts/`**: Scripts auxiliares para automação de tarefas.
+   - **`uploads/`**: Diretório onde os arquivos enviados são armazenados.
+   - **`dist/`**: Diretório onde o executável é gerado.
+
+### 6. **Manutenção e Atualizações**
+   - Para adicionar novas funcionalidades, edite os arquivos em `src/`.
+   - Atualize as dependências regularmente com `npm update`.
+   - Sempre teste o sistema em um ambiente de desenvolvimento antes de gerar o executável.
+
+---
+
+Com essas informações, o sistema está documentado e pronto para uso e manutenção. Caso precise de mais detalhes ou ajustes, é só avisar!
