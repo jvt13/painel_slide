@@ -170,21 +170,17 @@ function resolveBrowserExecutable() {
 
 function triggerAutoOpenF11() {
   if (!playerAutoOpenForceF11 || process.platform !== 'win32') return
-  const scriptPath = path.resolve(process.cwd(), 'start-player.bat')
-  if (!fs.existsSync(scriptPath)) {
-    console.warn('Script start-player.bat nao encontrado')
-    return
-  }
 
   try {
-    const child = spawn('cmd', ['/c', scriptPath], {
+    // Executa PowerShell para enviar F11 diretamente
+    const child = spawn('powershell', ['-command', "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('{F11}')"], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true
     })
     child.unref()
   } catch (error) {
-    console.warn('Falha ao executar start-player.bat:', error.message)
+    console.warn('Falha ao executar comando F11:', error.message)
   }
 }
 
