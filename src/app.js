@@ -168,51 +168,23 @@ function resolveBrowserExecutable() {
   return null
 }
 
-function resolveForceF11ScriptPath() {
-  const candidates = [
-    path.resolve(process.cwd(), 'scripts', 'force-f11.py'),
-    path.resolve(process.cwd(), 'force-f11.py'),
-    path.resolve(path.dirname(process.execPath), 'scripts', 'force-f11.py'),
-    path.resolve(path.dirname(process.execPath), 'force-f11.py')
-  ]
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null
-}
-
-function detectPythonCommand() {
-  const probes = [
-    { cmd: 'python', args: ['--version'], runArgs: [] },
-    { cmd: 'py', args: ['-3', '--version'], runArgs: ['-3'] },
-    { cmd: 'py', args: ['--version'], runArgs: [] }
-  ]
-
-  for (const probe of probes) {
-    const result = spawnSync(probe.cmd, probe.args, { stdio: 'ignore', windowsHide: true })
-    if (!result.error && result.status === 0) {
-      return { cmd: probe.cmd, runArgs: probe.runArgs }
-    }
-  }
-  return null
-}
-
 function triggerAutoOpenF11() {
   if (!playerAutoOpenForceF11 || process.platform !== 'win32') return
-  const scriptPath = resolveForceF11ScriptPath()
-  if (!scriptPath) return
-  const python = detectPythonCommand()
-  if (!python) return
+  const scriptPath = path.resolve(process.cwd(), 'start-player.bat')
+  if (!fs.existsSync(scriptPath)) {
+    console.warn('Script start-player.bat nao encontrado')
+    return
+  }
 
-  const windowTitleHint = process.env.PLAYER_WINDOW_TITLE_HINT || 'Player'
-  const urlHint = process.env.PLAYER_WINDOW_URL_HINT || playerAutoOpenUrl
-  const args = [...python.runArgs, scriptPath, windowTitleHint, urlHint]
   try {
-    const child = spawn(python.cmd, args, {
+    const child = spawn('cmd', ['/c', scriptPath], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true
     })
     child.unref()
   } catch (error) {
-    console.warn('Falha ao disparar F11 automatico:', error.message)
+    console.warn('Falha ao executar start-player.bat:', error.message)
   }
 }
 
@@ -230,7 +202,6 @@ function openPlayerInFullscreen() {
   const args = [
     '--new-window',
     `--app=${buildManagedPlayerUrl(playerAutoOpenUrl)}`,
-    '--start-fullscreen',
     '--autoplay-policy=no-user-gesture-required'
   ]
 
