@@ -24,6 +24,21 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage })
 
+function calculateCycleTimes(receivedStartsAt) {
+  const startDate = new Date(receivedStartsAt);
+  const startOfHour = new Date(startDate);
+  startOfHour.setMinutes(0, 0, 0); // Define o início da hora
+
+  const endOfHour = new Date(startOfHour);
+  endOfHour.setHours(endOfHour.getHours() + 1); // Próxima hora
+  endOfHour.setSeconds(endOfHour.getSeconds() - 1); // Último segundo antes do próximo ciclo
+
+  const startsAt = startDate.toISOString();
+  const endsAt = endOfHour.toISOString();
+
+  return { startsAt, endsAt };
+}
+
 async function listAllGroups() {
   const db = await getDb()
   return db.all('SELECT id, name, display_order as displayOrder FROM groups ORDER BY display_order, name')
@@ -730,6 +745,20 @@ router.post(
       if (!campaignName) {
         return res.status(400).json({ error: 'Nome da campanha e obrigatorio' })
       }
+
+      // Calcular datas baseado no startsAt fornecido
+      const receivedStartsAt = String(req.body?.startsAt || '').trim();
+      let startsAt, endsAt;
+      if (receivedStartsAt) {
+        ({ startsAt, endsAt } = calculateCycleTimes(receivedStartsAt));
+      } else {
+        // Usar data/hora atual local e calcular o ciclo da hora atual
+        const now = new Date();
+        ({ startsAt, endsAt } = calculateCycleTimes(now.toISOString()));
+      }
+
+      //console.log('Datas da campanha:', { startsAt, endsAt });
+
       let campaignId = null
       const existingCampaign = await db.get(
         'SELECT id FROM campaigns WHERE lower(name) = lower(?) AND group_id = ?',
@@ -738,17 +767,13 @@ router.post(
       if (existingCampaign) {
         campaignId = existingCampaign.id
       } else {
-        // cria nova campanha com periodo padrão (hoje até um ano à frente)
-        const now = new Date().toISOString()
-        const oneYear = new Date()
-        oneYear.setFullYear(oneYear.getFullYear() + 1)
-        const endsAt = oneYear.toISOString()
+        // cria nova campanha com período calculado
         const created = await db.run(
           `
           INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, created_by_user_id)
           VALUES (?, ?, ?, ?, 1, 1, ?)
           `,
-          [groupId, campaignName, now, endsAt, req.user.id]
+          [groupId, campaignName, startsAt, endsAt, req.user.id]
         )
         campaignId = created.lastID
       }
