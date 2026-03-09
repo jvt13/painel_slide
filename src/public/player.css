@@ -71,24 +71,20 @@ html, body {
 #container {
   width: 100%;
   height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
 }
 
-#container img,
-#container video,
-#container iframe,
-#container embed {
+.slide-layer img,
+.slide-layer video,
+.slide-layer iframe,
+.slide-layer embed {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  animation: fadeIn 0.8s ease;
 }
 
-#container iframe,
-#container embed {
+.slide-layer iframe,
+.slide-layer embed {
   width: 100%;
   height: 100%;
   border: none;
@@ -107,10 +103,6 @@ html, body {
   font-size: 20px;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 /*#footer .info {
   display: flex;
   flex-direction: column;

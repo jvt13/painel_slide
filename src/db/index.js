@@ -7,6 +7,12 @@ const { getDefaultDbPath } = require('../config/runtime-paths')
 
 const defaultDbPath = getDefaultDbPath()
 let dbPromise = null
+const TRANSITION_SETTING_KEY = 'panel_transition_effect'
+const DEFAULT_TRANSITION_EFFECT = 'fade'
+const ALLOWED_TRANSITION_EFFECTS = new Set(['fade', 'slide-left', 'zoom', 'flip'])
+const TRANSITION_SCOPE_SETTING_KEY = 'panel_transition_scope'
+const DEFAULT_TRANSITION_SCOPE = 'all'
+const ALLOWED_TRANSITION_SCOPES = new Set(['all', 'campaign', 'cover'])
 
 function getDbPath() {
   return process.env.DB_PATH
@@ -37,7 +43,7 @@ async function createSchema(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('master', 'group_user')),
+      role TEXT NOT NULL CHECK(role IN ('master', 'admin', 'group_user')),
       group_id INTEGER NULL,
       active INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY(group_id) REFERENCES groups(id)
@@ -150,6 +156,42 @@ async function ensureAppSettingsTable(db) {
   `)
 }
 
+async function ensureTransitionEffectSetting(db) {
+  const current = await db.get('SELECT value FROM app_settings WHERE key = ?', [
+    TRANSITION_SETTING_KEY
+  ])
+  const normalized = String(current?.value || '').trim().toLowerCase()
+
+  if (ALLOWED_TRANSITION_EFFECTS.has(normalized)) return
+
+  await db.run(
+    `
+    INSERT INTO app_settings (key, value)
+    VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `,
+    [TRANSITION_SETTING_KEY, DEFAULT_TRANSITION_EFFECT]
+  )
+}
+
+async function ensureTransitionScopeSetting(db) {
+  const current = await db.get('SELECT value FROM app_settings WHERE key = ?', [
+    TRANSITION_SCOPE_SETTING_KEY
+  ])
+  const normalized = String(current?.value || '').trim().toLowerCase()
+
+  if (ALLOWED_TRANSITION_SCOPES.has(normalized)) return
+
+  await db.run(
+    `
+    INSERT INTO app_settings (key, value)
+    VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `,
+    [TRANSITION_SCOPE_SETTING_KEY, DEFAULT_TRANSITION_SCOPE]
+  )
+}
+
 async function seedGroups(db) {
   const groups = ['Operacao', 'Marketing', 'Comercial']
   for (let index = 0; index < groups.length; index += 1) {
@@ -249,6 +291,8 @@ async function initializeDb() {
   await ensureSlideCampaignColumn(db)
   await ensureCampaignsTable(db)
   await ensureAppSettingsTable(db)
+  await ensureTransitionEffectSetting(db)
+  await ensureTransitionScopeSetting(db)
   await seedGroups(db)
   await seedUsers(db)
   await migrateJsonIfNeeded(db)

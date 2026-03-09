@@ -4,11 +4,17 @@ const path = require('path')
 const multer = require('multer')
 
 const { getDb } = require('../db')
-const { requireAuth, requireMaster } = require('../middlewares/auth.middleware')
+const { requireAuth, requireAdminOrMaster } = require('../middlewares/auth.middleware')
 const { getUploadsDir } = require('../config/runtime-paths')
 
 const router = express.Router()
 const uploadsPath = getUploadsDir()
+const TRANSITION_SETTING_KEY = 'panel_transition_effect'
+const DEFAULT_TRANSITION_EFFECT = 'fade'
+const ALLOWED_TRANSITION_EFFECTS = new Set(['fade', 'slide-left', 'zoom', 'flip'])
+const TRANSITION_SCOPE_SETTING_KEY = 'panel_transition_scope'
+const DEFAULT_TRANSITION_SCOPE = 'all'
+const ALLOWED_TRANSITION_SCOPES = new Set(['all', 'campaign', 'cover'])
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -37,6 +43,56 @@ function calculateCycleTimes(receivedStartsAt) {
   const endsAt = endOfHour.toISOString();
 
   return { startsAt, endsAt };
+}
+
+function normalizeTransitionEffect(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return ALLOWED_TRANSITION_EFFECTS.has(normalized)
+    ? normalized
+    : DEFAULT_TRANSITION_EFFECT
+}
+
+async function getTransitionEffect(db) {
+  const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [TRANSITION_SETTING_KEY])
+  return normalizeTransitionEffect(row?.value)
+}
+
+async function saveTransitionEffect(db, effect) {
+  const normalized = normalizeTransitionEffect(effect)
+  await db.run(
+    `
+    INSERT INTO app_settings (key, value)
+    VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `,
+    [TRANSITION_SETTING_KEY, normalized]
+  )
+  return normalized
+}
+
+function normalizeTransitionScope(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return ALLOWED_TRANSITION_SCOPES.has(normalized)
+    ? normalized
+    : DEFAULT_TRANSITION_SCOPE
+}
+
+async function getTransitionScope(db) {
+  const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [TRANSITION_SCOPE_SETTING_KEY])
+  return normalizeTransitionScope(row?.value)
+}
+
+async function saveTransitionScope(db, scope) {
+  const normalized = normalizeTransitionScope(scope)
+  await db.run(
+    `
+    INSERT INTO app_settings (key, value)
+    VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `,
+    [TRANSITION_SCOPE_SETTING_KEY, normalized]
+  )
+  return normalized
 }
 
 async function listAllGroups() {
@@ -219,7 +275,66 @@ router.get('/runtime-config', async (req, res, next) => {
   try {
     const raw = Number(process.env.AUTO_REFRESH_MS)
     const autoRefreshMs = Number.isFinite(raw) ? Math.max(5000, Math.min(300000, raw)) : 15000
-    return res.json({ autoRefreshMs })
+    const db = await getDb()
+    const transitionEffect = await getTransitionEffect(db)
+    const transitionScope = await getTransitionScope(db)
+    return res.json({ autoRefreshMs, transitionEffect, transitionScope })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.get('/public/transition-effect', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const effect = await getTransitionEffect(db)
+    const scope = await getTransitionScope(db)
+    return res.json({
+      effect,
+      scope,
+      allowedEffects: [...ALLOWED_TRANSITION_EFFECTS],
+      allowedScopes: [...ALLOWED_TRANSITION_SCOPES]
+    })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.get('/transition-effect', requireAuth, requireAdminOrMaster, async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const effect = await getTransitionEffect(db)
+    const scope = await getTransitionScope(db)
+    return res.json({
+      effect,
+      scope,
+      allowedEffects: [...ALLOWED_TRANSITION_EFFECTS],
+      allowedScopes: [...ALLOWED_TRANSITION_SCOPES]
+    })
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post('/transition-effect', requireAuth, requireAdminOrMaster, express.json(), async (req, res, next) => {
+  try {
+    const requested = req.body?.effect ?? req.body?.efeito_transicao
+    const candidate = String(requested || '').trim().toLowerCase()
+    const requestedScope = req.body?.scope ?? req.body?.escopo_transicao
+    const scopeCandidate = String(requestedScope || DEFAULT_TRANSITION_SCOPE).trim().toLowerCase()
+    if (!ALLOWED_TRANSITION_EFFECTS.has(candidate)) {
+      return res.status(400).json({ error: 'Efeito de transicao invalido' })
+    }
+    if (!ALLOWED_TRANSITION_SCOPES.has(scopeCandidate)) {
+      return res.status(400).json({ error: 'Escopo de transicao invalido' })
+    }
+
+    const db = await getDb()
+    const effect = await saveTransitionEffect(db, candidate)
+    const scope = await saveTransitionScope(db, scopeCandidate)
+    const io = req.app.get('io')
+    io.emit('transition:update', { effect, scope })
+    return res.json({ ok: true, effect, scope })
   } catch (error) {
     return next(error)
   }
@@ -241,11 +356,15 @@ router.get('/public/settings', async (req, res, next) => {
       'SELECT id, name, background, default_image FROM groups WHERE id = ?',
       [groupId]
     )
+    const transitionEffect = await getTransitionEffect(db)
+    const transitionScope = await getTransitionScope(db)
     return res.json({
       groupId: group.id,
       groupName: group.name,
       background: group.background || '#ffffff',
-      defaultImage: group.default_image || null
+      defaultImage: group.default_image || null,
+      transitionEffect,
+      transitionScope
     })
   } catch (error) {
     return next(error)
@@ -278,7 +397,7 @@ router.get('/groups', async (req, res, next) => {
   }
 })
 
-router.post('/groups/reorder', requireAuth, requireMaster, express.json(), async (req, res, next) => {
+router.post('/groups/reorder', requireAuth, requireAdminOrMaster, express.json(), async (req, res, next) => {
   try {
     const order = Array.isArray(req.body?.order) ? req.body.order : []
     if (!order.length) {
@@ -950,11 +1069,15 @@ router.get('/settings', async (req, res, next) => {
       'SELECT id, name, background, default_image FROM groups WHERE id = ?',
       [groupId]
     )
+    const transitionEffect = await getTransitionEffect(db)
+    const transitionScope = await getTransitionScope(db)
     return res.json({
       groupId: group.id,
       groupName: group.name,
       background: group.background || '#ffffff',
-      defaultImage: group.default_image || null
+      defaultImage: group.default_image || null,
+      transitionEffect,
+      transitionScope
     })
   } catch (error) {
     return next(error)

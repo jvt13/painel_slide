@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/x-icon" href="/assets/system-logo.ico" />
   <link rel="stylesheet" href="/admin/admin.css">
+  <link rel="stylesheet" href="/css/slide-effects.css">
   <title>Painel Admin</title>
 </head>
 
@@ -111,6 +112,34 @@
         </div>
         <p id="running-campaign" class="helper">Carregando campanha em execucao...</p>
         <iframe id="player-preview" class="player-preview" src="/player?preview=1"></iframe>
+      </section>
+
+      <section class="card settings hidden" id="transition-card">
+        <div class="card-header">
+          <h2>Efeito de Transicao Global</h2>
+        </div>
+        <div class="form transition-panel">
+          <label class="field">
+            <span>Tipo de transicao</span>
+            <select id="transition-effect-select">
+              <option value="fade">Fade</option>
+              <option value="slide-left">Slide lateral</option>
+              <option value="zoom">Zoom</option>
+              <option value="flip">Flip</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Aplicar transicao em</span>
+            <select id="transition-scope-select">
+              <option value="all">Capas e campanhas</option>
+              <option value="campaign">Somente campanhas</option>
+              <option value="cover">Somente capas</option>
+            </select>
+          </label>
+          <p class="helper">Aplicado na troca de capa, campanha e imagem no player.</p>
+          <div id="transition-preview" class="transition-preview" aria-label="Previa da transicao"></div>
+          <button class="btn primary" type="button" id="save-transition-effect-btn">Salvar configuracao</button>
+        </div>
       </section>
 
       <section class="card settings hidden" id="settings-card">
@@ -228,7 +257,14 @@
           <span>Senha</span>
           <input type="password" id="new-password" required />
         </label>
-        <label class="field">
+        <label class="field" id="user-type-field" style="display: none;">
+          <span>Tipo de usuario</span>
+          <select id="new-user-type">
+            <option value="group_user">Usuario de grupo</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </label>
+        <label class="field" id="user-group-field">
           <span>Grupo</span>
           <select id="new-user-group"></select>
         </label>
@@ -259,6 +295,8 @@
     </div>
   </div>
 
+  <script src="/js/player-effects.js"></script>
+  <script src="/js/preview-effects.js"></script>
   <script>
     let currentUser = null
     let groups = []
@@ -270,6 +308,8 @@
     let autoRefreshMs = 15000
     let campaignModalMode = 'create'
     let editingCampaignId = null
+    let transitionEffect = 'fade'
+    let transitionScope = 'all'
     const GROUP_STORAGE_KEY = 'admin:selectedGroupId'
 
     const loginCard = document.getElementById('login-card')
@@ -279,6 +319,7 @@
     const usersCard = document.getElementById('users-card')
     const groupsOrderCard = document.getElementById('groups-order-card')
     const settingsCard = document.getElementById('settings-card')
+    const transitionCard = document.getElementById('transition-card')
     const sqlConsoleLink = document.getElementById('sql-console-link')
     const protectSlideWrap = document.getElementById('protect-slide-wrap')
     const protectSlideInput = document.getElementById('protect-slide')
@@ -310,6 +351,10 @@
     const campaignSlidesWrap = document.getElementById('campaign-slides-wrap')
     const campaignSlidesList = document.getElementById('campaign-slides-list')
     const campaignSlidesTitle = document.getElementById('campaign-slides-title')
+    const transitionEffectSelect = document.getElementById('transition-effect-select')
+    const transitionScopeSelect = document.getElementById('transition-scope-select')
+    const transitionPreview = document.getElementById('transition-preview')
+    const saveTransitionEffectBtn = document.getElementById('save-transition-effect-btn')
 
     function getGroupQuery() {
       return selectedGroupId ? `?groupId=${selectedGroupId}` : ''
@@ -400,6 +445,45 @@
       return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
     }
 
+    function canManageTransitionEffect() {
+      return currentUser && (currentUser.role === 'master' || currentUser.role === 'admin')
+    }
+
+    function runTransitionPreview(effect) {
+      if (!transitionPreview || !window.VisualLoopPreviewEffects) return
+      window.VisualLoopPreviewEffects.applyPreviewEffect(transitionPreview, effect)
+    }
+
+    async function loadTransitionEffectConfig() {
+      if (!canManageTransitionEffect()) return
+      const payload = await requestJson('/media/transition-effect', { cache: 'no-store' })
+      transitionEffect = String(payload?.effect || 'fade')
+      transitionScope = String(payload?.scope || 'all')
+      if (transitionEffectSelect) {
+        transitionEffectSelect.value = transitionEffect
+      }
+      if (transitionScopeSelect) {
+        transitionScopeSelect.value = transitionScope
+      }
+      runTransitionPreview(transitionEffect)
+    }
+
+    async function saveTransitionEffectConfig() {
+      if (!canManageTransitionEffect()) return
+      const selected = transitionEffectSelect ? transitionEffectSelect.value : 'fade'
+      const selectedScope = transitionScopeSelect ? transitionScopeSelect.value : 'all'
+      await requestJson('/media/transition-effect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ effect: selected, scope: selectedScope })
+      })
+      transitionEffect = selected
+      transitionScope = selectedScope
+      runTransitionPreview(transitionEffect)
+      refreshPlayerPreview()
+      alert('Configuracao de transicao salva')
+    }
+
     function renderAuth() {
       const userLabel = document.getElementById('user-label')
       if (!currentUser) {
@@ -411,6 +495,7 @@
       userLabel.textContent = `Usuario: ${currentUser.username} (${currentUser.role === 'master' ? 'master' : currentUser.groupName || 'grupo'})`
       loginCard.classList.add('hidden')
       appShell.classList.remove('hidden')
+      const canManageTransition = canManageTransitionEffect()
 
       if (currentUser.role === 'master') {
         groupSwitchWrap.classList.remove('hidden')
@@ -441,6 +526,14 @@
         if (settingsCard) settingsCard.classList.add('hidden')
         if (protectSlideWrap) protectSlideWrap.classList.add('hidden')
         if (protectSlideInput) protectSlideInput.checked = false
+      }
+
+      if (transitionCard) {
+        if (canManageTransition) {
+          transitionCard.classList.remove('hidden')
+        } else {
+          transitionCard.classList.add('hidden')
+        }
       }
 
       syncGroupHiddenFields()
@@ -498,7 +591,11 @@
 
     async function loadAllData() {
       syncGroupHiddenFields()
-      await Promise.all([loadSettings(), loadCampaigns(), loadRunningCampaign()])
+      const tasks = [loadSettings(), loadCampaigns(), loadRunningCampaign()]
+      if (canManageTransitionEffect()) {
+        tasks.push(loadTransitionEffectConfig())
+      }
+      await Promise.all(tasks)
       refreshPlayerPreview()
       if (currentUser && currentUser.role === 'master') {
         await loadRuntimeConfig()
@@ -512,6 +609,9 @@
       isAutoRefreshingAdmin = true
       try {
         const tasks = [loadCampaigns(), loadRunningCampaign()]
+        if (currentUser.role === 'master' || currentUser.role === 'admin') {
+          tasks.push(loadTransitionEffectConfig())
+        }
         if (currentUser.role === 'master') {
           tasks.push(loadRuntimeConfig())
         }
@@ -920,18 +1020,20 @@
     }
 
     async function loadUsers() {
-      if (!currentUser || currentUser.role !== 'master') return
+      if (!currentUser) return
       const users = await requestJson('/auth/users')
       usersList.innerHTML = ''
 
+      // Master vê todos, admin vê só group_user
+      const showAll = currentUser.role === 'master'
       users
-        .filter((item) => item.role === 'group_user')
+        .filter((item) => showAll || item.role === 'group_user')
         .forEach((item) => {
           const li = document.createElement('li')
           li.className = 'user-item'
           li.innerHTML = `
             <strong>${item.username}</strong>
-            <span>${item.groupName || 'Sem grupo'}</span>
+            <span>${item.role === 'admin' ? 'Administrador' : item.groupName || 'Sem grupo'}</span>
             <span>${Number(item.active) === 1 ? 'Ativo' : 'Inativo'}</span>
           `
           usersList.appendChild(li)
@@ -1080,13 +1182,41 @@
 
       const username = document.getElementById('new-username').value.trim()
       const password = document.getElementById('new-password').value
+      const userType = document.getElementById('new-user-type').value
       const groupId = Number(document.getElementById('new-user-group').value)
 
+      // Validações básicas
+      if (!username) {
+        msg.textContent = 'Informe o nome do usuário'
+        return
+      }
+      if (!password) {
+        msg.textContent = 'Informe a senha'
+        return
+      }
+      if (password.length < 4) {
+        msg.textContent = 'A senha deve ter pelo menos 4 caracteres'
+        return
+      }
+      if (userType !== 'admin' && (!Number.isInteger(groupId) || groupId <= 0)) {
+        msg.textContent = 'Selecione um grupo válido'
+        return
+      }
+
+      const isAdmin = userType === 'admin'
+      const requestBody = { username, password }
+
+      if (isAdmin) {
+        requestBody.isAdmin = true
+      } else {
+        requestBody.groupId = groupId
+      }
+
       try {
-        await requestJson('/auth/users', {
+        const response = await requestJson('/auth/users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password, groupId })
+          body: JSON.stringify(requestBody)
         })
         msg.textContent = 'Usuario criado com sucesso.'
         document.getElementById('create-user-form').reset()
@@ -1221,8 +1351,30 @@
     })
 
     openUserModalBtn.addEventListener('click', () => {
+      // Mostrar campo de tipo apenas para master
+      const userTypeField = document.getElementById('user-type-field')
+      const userGroupField = document.getElementById('user-group-field')
+      const userTypeSelect = document.getElementById('new-user-type')
+      const newUserGroupSelect = document.getElementById('new-user-group')
+
+      if (currentUser && currentUser.role === 'master') {
+        userTypeField.style.display = 'block'
+        userTypeSelect.value = 'group_user' // padrão
+        userGroupField.style.display = 'block'
+      } else {
+        userTypeField.style.display = 'none'
+        userGroupField.style.display = 'block'
+      }
+
       openModal(userModal)
       setTimeout(() => document.getElementById('new-username').focus(), 30)
+    })
+
+    // Controlar visibilidade do campo grupo baseado no tipo de usuário
+    document.getElementById('new-user-type').addEventListener('change', (event) => {
+      const userGroupField = document.getElementById('user-group-field')
+      const isAdmin = event.target.value === 'admin'
+      userGroupField.style.display = isAdmin ? 'none' : 'block'
     })
 
     openGroupModalBtn.addEventListener('click', () => {
@@ -1301,6 +1453,22 @@
     const mediaInput = document.getElementById('media-file')
     if (mediaInput) {
       mediaInput.addEventListener('change', handleMediaChange)
+    }
+
+    if (transitionEffectSelect) {
+      transitionEffectSelect.addEventListener('change', (event) => {
+        runTransitionPreview(event.target.value)
+      })
+    }
+
+    if (saveTransitionEffectBtn) {
+      saveTransitionEffectBtn.addEventListener('click', async () => {
+        try {
+          await saveTransitionEffectConfig()
+        } catch (error) {
+          alert(error.message || 'Falha ao salvar configuracao de transicao')
+        }
+      })
     }
 
     window.addEventListener('online', checkServerStatus)
