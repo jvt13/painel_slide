@@ -57,7 +57,7 @@ process.env.AUTH_SECRET = process.env.AUTH_SECRET || 'default-secret';
 
 const { getDb } = require('./db')
 const authRoutes = require('./routes/auth.routes')
-const { attachUser, requireAuth, requireMaster } = require('./middlewares/auth.middleware')
+const { attachUser, requireAuth, requireMaster, requireAdminOrMaster } = require('./middlewares/auth.middleware')
 const mediaRoutes = require('./routes/media.routes')
 const { getUploadsDir } = require('./config/runtime-paths')
 const {
@@ -168,19 +168,51 @@ function resolveBrowserExecutable() {
   return null
 }
 
+function resolveForceF11ScriptPath() {
+  const candidates = [
+    path.resolve(process.cwd(), 'scripts', 'force-f11.py'),
+    path.resolve(process.cwd(), 'force-f11.py'),
+    path.resolve(path.dirname(process.execPath), 'scripts', 'force-f11.py'),
+    path.resolve(path.dirname(process.execPath), 'force-f11.py')
+  ]
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null
+}
+
+function detectPythonCommand() {
+  const probes = [
+    { cmd: 'python', args: ['--version'], runArgs: [] },
+    { cmd: 'py', args: ['-3', '--version'], runArgs: ['-3'] },
+    { cmd: 'py', args: ['--version'], runArgs: [] }
+  ]
+
+  for (const probe of probes) {
+    const result = spawnSync(probe.cmd, probe.args, { stdio: 'ignore', windowsHide: true })
+    if (!result.error && result.status === 0) {
+      return { cmd: probe.cmd, runArgs: probe.runArgs }
+    }
+  }
+  return null
+}
+
 function triggerAutoOpenF11() {
   if (!playerAutoOpenForceF11 || process.platform !== 'win32') return
+  const scriptPath = resolveForceF11ScriptPath()
+  if (!scriptPath) return
+  const python = detectPythonCommand()
+  if (!python) return
 
+  const windowTitleHint = process.env.PLAYER_WINDOW_TITLE_HINT || 'Player'
+  const urlHint = process.env.PLAYER_WINDOW_URL_HINT || playerAutoOpenUrl
+  const args = [...python.runArgs, scriptPath, windowTitleHint, urlHint]
   try {
-    // Executa PowerShell para enviar F11 diretamente
-    const child = spawn('powershell', ['-command', "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('{F11}')"], {
+    const child = spawn(python.cmd, args, {
       detached: true,
       stdio: 'ignore',
       windowsHide: true
     })
     child.unref()
   } catch (error) {
-    console.warn('Falha ao executar comando F11:', error.message)
+    console.warn('Falha ao disparar F11 automatico:', error.message)
   }
 }
 
@@ -198,6 +230,7 @@ function openPlayerInFullscreen() {
   const args = [
     '--new-window',
     `--app=${buildManagedPlayerUrl(playerAutoOpenUrl)}`,
+    '--start-fullscreen',
     '--autoplay-policy=no-user-gesture-required'
   ]
 
@@ -227,13 +260,45 @@ function buildManagedPlayerUrl(rawUrl) {
 }
 
 function closeAutoOpenedPlayerWindow() {
-  if (!playerBrowserProcess || !playerBrowserProcess.pid) return
+  if (!playerBrowserProcess || !playerBrowserProcess.pid) {
+    // Se não temos o PID, tenta fechar por título da janela
+    try {
+      spawn('powershell', ['-WindowStyle', 'Hidden', '-command', `
+        $wshell = New-Object -ComObject wscript.shell
+        $wshell.AppActivate('Player')
+        Start-Sleep -Milliseconds 200
+        $wshell.SendKeys('%{F4}')
+      `], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      })
+    } catch (error) {
+      // ignore
+    }
+    return
+  }
+
   try {
     if (process.platform === 'win32') {
+      // Tenta fechar usando taskkill
       spawnSync('taskkill', ['/PID', String(playerBrowserProcess.pid), '/T', '/F'], {
         stdio: 'ignore',
         windowsHide: true
       })
+      
+      // Como alternativa, tenta enviar Alt+F4 para fechar a janela
+      setTimeout(() => {
+        try {
+          spawn('powershell', ['-WindowStyle', 'Hidden', '-command', "$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('%{F4}')"], {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true
+          })
+        } catch (error) {
+          // ignore
+        }
+      }, 500)
     } else {
       playerBrowserProcess.kill('SIGTERM')
     }
@@ -293,6 +358,12 @@ process.on('SIGINT', () => shutdown('SIGINT'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGUSR2', () => shutdown('SIGUSR2'))
 process.on('exit', closeAutoOpenedPlayerWindow)
+process.on('beforeExit', closeAutoOpenedPlayerWindow)
+process.on('uncaughtException', (error) => {
+  console.error('uncaughtException:', error && error.stack ? error.stack : error)
+  closeAutoOpenedPlayerWindow()
+  process.exit(1)
+})
 
 function getCampaignStatus(startsAt, endsAt, enabled) {
   if (!enabled) return 'inativa'
@@ -321,19 +392,20 @@ async function monitorCampaignTransitions() {
         [group.id]
       )
 
-      const activeCampaign = campaigns.find(
-        (campaign) =>
-          getCampaignStatus(campaign.starts_at, campaign.ends_at, Number(campaign.active) === 1) ===
-          'executando'
-      )
-
-      const currentActiveId = activeCampaign ? activeCampaign.id : null
-      const previousActiveId = activeCampaignByGroup.has(group.id)
+      const activeCampaignIds = campaigns
+        .filter(
+          (campaign) =>
+            getCampaignStatus(campaign.starts_at, campaign.ends_at, Number(campaign.active) === 1) ===
+            'executando'
+        )
+        .map((campaign) => campaign.id)
+      const currentActiveKey = activeCampaignIds.join(',')
+      const previousActiveKey = activeCampaignByGroup.has(group.id)
         ? activeCampaignByGroup.get(group.id)
-        : null
+        : ''
 
-      if (currentActiveId !== previousActiveId) {
-        activeCampaignByGroup.set(group.id, currentActiveId)
+      if (currentActiveKey !== previousActiveKey) {
+        activeCampaignByGroup.set(group.id, currentActiveKey)
         io.emit('playlist:update', { groupId: group.id, reason: 'campaign-transition' })
       }
     }

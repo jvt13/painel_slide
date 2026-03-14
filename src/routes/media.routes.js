@@ -4,17 +4,11 @@ const path = require('path')
 const multer = require('multer')
 
 const { getDb } = require('../db')
-const { requireAuth, requireAdminOrMaster } = require('../middlewares/auth.middleware')
+const { requireAuth, requireMaster } = require('../middlewares/auth.middleware')
 const { getUploadsDir } = require('../config/runtime-paths')
 
 const router = express.Router()
 const uploadsPath = getUploadsDir()
-const TRANSITION_SETTING_KEY = 'panel_transition_effect'
-const DEFAULT_TRANSITION_EFFECT = 'fade'
-const ALLOWED_TRANSITION_EFFECTS = new Set(['fade', 'slide-left', 'zoom', 'flip'])
-const TRANSITION_SCOPE_SETTING_KEY = 'panel_transition_scope'
-const DEFAULT_TRANSITION_SCOPE = 'all'
-const ALLOWED_TRANSITION_SCOPES = new Set(['all', 'campaign', 'cover'])
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -29,6 +23,15 @@ const storage = multer.diskStorage({
 })
 
 const upload = multer({ storage })
+const MAX_SLIDE_DURATION_SECONDS = 20
+
+function normalizeUploadDurationMs(rawValue, fallbackSeconds = 5) {
+  const parsed = Number(rawValue)
+  const fallback = Number.isFinite(fallbackSeconds) ? fallbackSeconds : 5
+  const safeSeconds = Number.isFinite(parsed) ? parsed : fallback
+  const clampedSeconds = Math.min(MAX_SLIDE_DURATION_SECONDS, Math.max(1, safeSeconds))
+  return Math.round(clampedSeconds * 1000)
+}
 
 function calculateCycleTimes(receivedStartsAt) {
   const startDate = new Date(receivedStartsAt);
@@ -43,56 +46,6 @@ function calculateCycleTimes(receivedStartsAt) {
   const endsAt = endOfHour.toISOString();
 
   return { startsAt, endsAt };
-}
-
-function normalizeTransitionEffect(value) {
-  const normalized = String(value || '').trim().toLowerCase()
-  return ALLOWED_TRANSITION_EFFECTS.has(normalized)
-    ? normalized
-    : DEFAULT_TRANSITION_EFFECT
-}
-
-async function getTransitionEffect(db) {
-  const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [TRANSITION_SETTING_KEY])
-  return normalizeTransitionEffect(row?.value)
-}
-
-async function saveTransitionEffect(db, effect) {
-  const normalized = normalizeTransitionEffect(effect)
-  await db.run(
-    `
-    INSERT INTO app_settings (key, value)
-    VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `,
-    [TRANSITION_SETTING_KEY, normalized]
-  )
-  return normalized
-}
-
-function normalizeTransitionScope(value) {
-  const normalized = String(value || '').trim().toLowerCase()
-  return ALLOWED_TRANSITION_SCOPES.has(normalized)
-    ? normalized
-    : DEFAULT_TRANSITION_SCOPE
-}
-
-async function getTransitionScope(db) {
-  const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [TRANSITION_SCOPE_SETTING_KEY])
-  return normalizeTransitionScope(row?.value)
-}
-
-async function saveTransitionScope(db, scope) {
-  const normalized = normalizeTransitionScope(scope)
-  await db.run(
-    `
-    INSERT INTO app_settings (key, value)
-    VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `,
-    [TRANSITION_SCOPE_SETTING_KEY, normalized]
-  )
-  return normalized
 }
 
 async function listAllGroups() {
@@ -207,28 +160,56 @@ function getCampaignStatus(startsAt, endsAt, enabled) {
   return 'executando'
 }
 
-async function resolveActiveCampaign(db, groupId) {
+function isCampaignReorderableStatus(status) {
+  return status === 'executando' || status === 'agendada'
+}
+
+function getCampaignSortBucket(status) {
+  return isCampaignReorderableStatus(status) ? 0 : 1
+}
+
+function sortCampaignRowsForDisplay(rows) {
+  return [...rows].sort((left, right) => {
+    const leftStatus = getCampaignStatus(left.starts_at || left.startsAt, left.ends_at || left.endsAt, Number(left.active) === 1)
+    const rightStatus = getCampaignStatus(right.starts_at || right.startsAt, right.ends_at || right.endsAt, Number(right.active) === 1)
+
+    const bucketDiff = getCampaignSortBucket(leftStatus) - getCampaignSortBucket(rightStatus)
+    if (bucketDiff !== 0) return bucketDiff
+
+    if (bucketDiff === 0 && getCampaignSortBucket(leftStatus) === 0) {
+      const leftPriority = Number(left.priority || 1)
+      const rightPriority = Number(right.priority || 1)
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority
+    }
+
+    const leftStart = new Date(left.starts_at || left.startsAt).getTime()
+    const rightStart = new Date(right.starts_at || right.startsAt).getTime()
+    if (leftStart !== rightStart) return leftStart - rightStart
+
+    return Number(left.id) - Number(right.id)
+  })
+}
+
+async function resolveActiveCampaigns(db, groupId) {
   const campaigns = await db.all(
     `
     SELECT id, name, starts_at, ends_at, active, priority
     FROM campaigns
     WHERE group_id = ?
-    ORDER BY priority ASC, starts_at ASC, id ASC
     `,
     [groupId]
   )
 
-  const active = campaigns.find(
+  return sortCampaignRowsForDisplay(campaigns).filter(
     (campaign) =>
       getCampaignStatus(campaign.starts_at, campaign.ends_at, Number(campaign.active) === 1) ===
       'executando'
   )
-  return active || null
 }
 
 async function buildActivePayload(groupId) {
   const db = await getDb()
-  const activeCampaign = await resolveActiveCampaign(db, groupId)
+  const activeCampaigns = await resolveActiveCampaigns(db, groupId)
   const coverRows = await db.all(
     `
     SELECT id, campaign_id, type, name, src, duration, is_locked
@@ -240,27 +221,32 @@ async function buildActivePayload(groupId) {
   )
 
   let rows = []
-  if (activeCampaign) {
-    rows = await db.all(
-      `
-      SELECT id, campaign_id, type, name, src, duration, is_locked
-      FROM slides
-      WHERE group_id = ? AND campaign_id = ?
-      ORDER BY position, id
-      `,
-      [groupId, activeCampaign.id]
-    )
-  } else {
-    rows = []
+  if (activeCampaigns.length) {
+    for (const campaign of activeCampaigns) {
+      const campaignRows = await db.all(
+        `
+        SELECT id, campaign_id, type, name, src, duration, is_locked
+        FROM slides
+        WHERE group_id = ? AND campaign_id = ?
+        ORDER BY position, id
+        `,
+        [groupId, campaign.id]
+      )
+      rows.push(...campaignRows)
+    }
   }
 
   return {
-    campaign: activeCampaign
+    campaign: activeCampaigns[0]
       ? {
-          id: activeCampaign.id,
-          name: activeCampaign.name
+          id: activeCampaigns[0].id,
+          name: activeCampaigns[0].name
         }
       : null,
+    activeCampaigns: activeCampaigns.map((item) => ({
+      id: item.id,
+      name: item.name
+    })),
     coverSlides: coverRows.map(mapSlide),
     slides: rows.map(mapSlide)
   }
@@ -275,66 +261,7 @@ router.get('/runtime-config', async (req, res, next) => {
   try {
     const raw = Number(process.env.AUTO_REFRESH_MS)
     const autoRefreshMs = Number.isFinite(raw) ? Math.max(5000, Math.min(300000, raw)) : 15000
-    const db = await getDb()
-    const transitionEffect = await getTransitionEffect(db)
-    const transitionScope = await getTransitionScope(db)
-    return res.json({ autoRefreshMs, transitionEffect, transitionScope })
-  } catch (error) {
-    return next(error)
-  }
-})
-
-router.get('/public/transition-effect', async (req, res, next) => {
-  try {
-    const db = await getDb()
-    const effect = await getTransitionEffect(db)
-    const scope = await getTransitionScope(db)
-    return res.json({
-      effect,
-      scope,
-      allowedEffects: [...ALLOWED_TRANSITION_EFFECTS],
-      allowedScopes: [...ALLOWED_TRANSITION_SCOPES]
-    })
-  } catch (error) {
-    return next(error)
-  }
-})
-
-router.get('/transition-effect', requireAuth, requireAdminOrMaster, async (req, res, next) => {
-  try {
-    const db = await getDb()
-    const effect = await getTransitionEffect(db)
-    const scope = await getTransitionScope(db)
-    return res.json({
-      effect,
-      scope,
-      allowedEffects: [...ALLOWED_TRANSITION_EFFECTS],
-      allowedScopes: [...ALLOWED_TRANSITION_SCOPES]
-    })
-  } catch (error) {
-    return next(error)
-  }
-})
-
-router.post('/transition-effect', requireAuth, requireAdminOrMaster, express.json(), async (req, res, next) => {
-  try {
-    const requested = req.body?.effect ?? req.body?.efeito_transicao
-    const candidate = String(requested || '').trim().toLowerCase()
-    const requestedScope = req.body?.scope ?? req.body?.escopo_transicao
-    const scopeCandidate = String(requestedScope || DEFAULT_TRANSITION_SCOPE).trim().toLowerCase()
-    if (!ALLOWED_TRANSITION_EFFECTS.has(candidate)) {
-      return res.status(400).json({ error: 'Efeito de transicao invalido' })
-    }
-    if (!ALLOWED_TRANSITION_SCOPES.has(scopeCandidate)) {
-      return res.status(400).json({ error: 'Escopo de transicao invalido' })
-    }
-
-    const db = await getDb()
-    const effect = await saveTransitionEffect(db, candidate)
-    const scope = await saveTransitionScope(db, scopeCandidate)
-    const io = req.app.get('io')
-    io.emit('transition:update', { effect, scope })
-    return res.json({ ok: true, effect, scope })
+    return res.json({ autoRefreshMs })
   } catch (error) {
     return next(error)
   }
@@ -356,15 +283,11 @@ router.get('/public/settings', async (req, res, next) => {
       'SELECT id, name, background, default_image FROM groups WHERE id = ?',
       [groupId]
     )
-    const transitionEffect = await getTransitionEffect(db)
-    const transitionScope = await getTransitionScope(db)
     return res.json({
       groupId: group.id,
       groupName: group.name,
       background: group.background || '#ffffff',
-      defaultImage: group.default_image || null,
-      transitionEffect,
-      transitionScope
+      defaultImage: group.default_image || null
     })
   } catch (error) {
     return next(error)
@@ -397,7 +320,7 @@ router.get('/groups', async (req, res, next) => {
   }
 })
 
-router.post('/groups/reorder', requireAuth, requireAdminOrMaster, express.json(), async (req, res, next) => {
+router.post('/groups/reorder', requireAuth, requireMaster, express.json(), async (req, res, next) => {
   try {
     const order = Array.isArray(req.body?.order) ? req.body.order : []
     if (!order.length) {
@@ -463,18 +386,77 @@ router.get('/campaigns', requireAuth, async (req, res, next) => {
       SELECT id, group_id as groupId, name, starts_at as startsAt, ends_at as endsAt, active, priority
       FROM campaigns
       WHERE group_id = ?
-      ORDER BY starts_at ASC, id ASC
       `,
       [groupId]
     )
 
+    const sorted = sortCampaignRowsForDisplay(campaigns)
     return res.json(
-      campaigns.map((item) => ({
+      sorted.map((item) => ({
         ...item,
         active: Number(item.active) === 1,
         status: getCampaignStatus(item.startsAt, item.endsAt, Number(item.active) === 1)
       }))
     )
+  } catch (error) {
+    return next(error)
+  }
+})
+
+router.post('/campaigns/reorder', requireAuth, express.json(), async (req, res, next) => {
+  try {
+    const groupId = await resolveGroupId(req, { forWrite: true })
+    const campaignId = Number(req.body?.campaignId)
+    const dir = Number(req.body?.dir)
+    if (!Number.isInteger(campaignId) || campaignId <= 0 || !Number.isInteger(dir)) {
+      return res.status(400).json({ error: 'Dados invalidos para reordenacao' })
+    }
+
+    const db = await getDb()
+    const campaigns = await db.all(
+      `
+      SELECT id, starts_at, ends_at, active, priority
+      FROM campaigns
+      WHERE group_id = ?
+      `,
+      [groupId]
+    )
+
+    const reorderable = sortCampaignRowsForDisplay(campaigns).filter((item) =>
+      isCampaignReorderableStatus(getCampaignStatus(item.starts_at, item.ends_at, Number(item.active) === 1))
+    )
+
+    const index = reorderable.findIndex((item) => item.id === campaignId)
+    if (index < 0) {
+      return res.status(400).json({ error: 'Somente campanhas executando ou agendadas podem ser reordenadas' })
+    }
+
+    const nextIndex = index + dir
+    if (nextIndex < 0 || nextIndex >= reorderable.length) {
+      return res.json({ ok: true, changed: false })
+    }
+
+    const temp = reorderable[index]
+    reorderable[index] = reorderable[nextIndex]
+    reorderable[nextIndex] = temp
+
+    await db.run('BEGIN TRANSACTION')
+    try {
+      for (let orderIndex = 0; orderIndex < reorderable.length; orderIndex += 1) {
+        await db.run('UPDATE campaigns SET priority = ? WHERE id = ? AND group_id = ?', [
+          orderIndex + 1,
+          reorderable[orderIndex].id,
+          groupId
+        ])
+      }
+      await db.run('COMMIT')
+    } catch (error) {
+      await db.run('ROLLBACK')
+      throw error
+    }
+
+    await emitGroupUpdate(req, 'playlist:update', groupId)
+    return res.json({ ok: true, changed: true })
   } catch (error) {
     return next(error)
   }
@@ -486,7 +468,6 @@ router.post('/campaigns', requireAuth, express.json(), async (req, res, next) =>
     const name = String(req.body?.name || '').trim()
     const startsAt = String(req.body?.startsAt || '').trim()
     const endsAt = String(req.body?.endsAt || '').trim()
-    const priority = Number(req.body?.priority || 1)
 
     if (!name || !startsAt || !endsAt) {
       return res.status(400).json({ error: 'Nome, inicio e fim sao obrigatorios' })
@@ -499,9 +480,9 @@ router.post('/campaigns', requireAuth, express.json(), async (req, res, next) =>
     const created = await db.run(
       `
       INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, created_by_user_id)
-      VALUES (?, ?, ?, ?, 1, ?, ?)
+      VALUES (?, ?, ?, ?, 1, 1, ?)
       `,
-      [groupId, name, startsAt, endsAt, Math.max(1, priority), req.user.id || null]
+      [groupId, name, startsAt, endsAt, req.user.id || null]
     )
 
     await emitGroupUpdate(req, 'playlist:update', groupId)
@@ -518,7 +499,6 @@ router.post('/campaigns/update', requireAuth, express.json(), async (req, res, n
     const name = String(req.body?.name || '').trim()
     const startsAt = String(req.body?.startsAt || '').trim()
     const endsAt = String(req.body?.endsAt || '').trim()
-    const priority = Number(req.body?.priority || 1)
 
     if (!Number.isInteger(campaignId) || campaignId <= 0) {
       return res.status(400).json({ error: 'Campanha invalida' })
@@ -542,10 +522,10 @@ router.post('/campaigns/update', requireAuth, express.json(), async (req, res, n
     await db.run(
       `
       UPDATE campaigns
-      SET name = ?, starts_at = ?, ends_at = ?, priority = ?
+      SET name = ?, starts_at = ?, ends_at = ?
       WHERE id = ? AND group_id = ?
       `,
-      [name, startsAt, endsAt, Math.max(1, priority), campaignId, groupId]
+      [name, startsAt, endsAt, campaignId, groupId]
     )
 
     await emitGroupUpdate(req, 'playlist:update', groupId)
@@ -854,7 +834,7 @@ router.post(
       }
 
       const db = await getDb()
-      const duration = Math.max(1000, Number(req.body?.duration || 5) * 1000)
+      const duration = normalizeUploadDurationMs(req.body?.duration, 5)
       const inputName = String(req.body?.name || '').trim()
       const shouldLock =
         req.user.role === 'master' &&
@@ -961,7 +941,7 @@ router.post(
       }
 
       const db = await getDb()
-      const duration = Math.max(1000, Number(req.body?.duration || 5) * 1000)
+      const duration = normalizeUploadDurationMs(req.body?.duration, 5)
       const inputName = String(req.body?.name || '').trim()
       const shouldLock =
         req.user.role === 'master' &&
@@ -984,7 +964,6 @@ router.post(
         const name = String(req.body?.campaignName || '').trim()
         const startsAt = String(req.body?.startsAt || '').trim()
         const endsAt = String(req.body?.endsAt || '').trim()
-        const priority = Math.max(1, Number(req.body?.priority || 1))
 
         if (!name || !startsAt || !endsAt) {
           return res.status(400).json({
@@ -1000,9 +979,9 @@ router.post(
         const created = await db.run(
           `
           INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, created_by_user_id)
-          VALUES (?, ?, ?, ?, 1, ?, ?)
+          VALUES (?, ?, ?, ?, 1, 1, ?)
           `,
-          [groupId, name, startsAt, endsAt, priority, req.user.id || null]
+          [groupId, name, startsAt, endsAt, req.user.id || null]
         )
         campaignId = created.lastID
       }
@@ -1069,15 +1048,11 @@ router.get('/settings', async (req, res, next) => {
       'SELECT id, name, background, default_image FROM groups WHERE id = ?',
       [groupId]
     )
-    const transitionEffect = await getTransitionEffect(db)
-    const transitionScope = await getTransitionScope(db)
     return res.json({
       groupId: group.id,
       groupName: group.name,
       background: group.background || '#ffffff',
-      defaultImage: group.default_image || null,
-      transitionEffect,
-      transitionScope
+      defaultImage: group.default_image || null
     })
   } catch (error) {
     return next(error)
@@ -1186,7 +1161,7 @@ router.post('/upload', requireAuth, upload.single('media'), async (req, res, nex
       type === 'image' ? 'images' : type === 'video' ? 'videos' : 'pdfs'
     }/${file.filename}`
 
-    const duration = Math.max(1000, Number(req.body?.duration || 5) * 1000)
+    const duration = normalizeUploadDurationMs(req.body?.duration, 5)
     const campaignId = req.body?.campaignId ? Number(req.body.campaignId) : null
     const shouldLock =
       req.user.role === 'master' &&

@@ -10,6 +10,7 @@ $localCacheV34Dir = Join-Path $localCacheDir 'v3.4'
 $localFetched = Join-Path $localCacheV34Dir 'fetched-v18.5.0-win-x64'
 $globalFetched = Join-Path $env:USERPROFILE '.pkg-cache\v3.4\fetched-v18.5.0-win-x64'
 $exePath = Join-Path $projectRoot 'dist\painel_slide.exe'
+$iconPath = Join-Path $projectRoot 'src\public\assets\icon_256x256.ico'
 
 if (!(Test-Path $localCacheV34Dir)) {
   New-Item -ItemType Directory -Path $localCacheV34Dir -Force | Out-Null
@@ -23,7 +24,10 @@ if (!(Test-Path $localFetched) -and (Test-Path $globalFetched)) {
 $env:PKG_CACHE_PATH = $localCacheDir
 
 Write-Host '==> Gerando executavel base (pkg --no-bytecode)...'
-npx pkg . --targets node18-win-x64 --out-path dist --no-bytecode
+if (!(Test-Path $iconPath)) {
+  throw "Icone nao encontrado em: $iconPath"
+}
+npx pkg . --targets node18-win-x64 --out-path dist --no-bytecode --icon $iconPath
 
 Write-Host '==> Copiando binarios/assets auxiliares...'
 npm run build:exe:native

@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/x-icon" href="/assets/system-logo.ico" />
   <link rel="stylesheet" href="/admin/admin.css">
-  <link rel="stylesheet" href="/css/slide-effects.css">
   <title>Painel Admin</title>
 </head>
 
@@ -73,8 +72,9 @@
             </label>
 
             <label class="field">
-              <span>Duracao de cada imagem (segundos)</span>
-              <input type="number" id="duration" name="duration" min="1" value="5" required />
+              <span>Duracao de cada imagem (segundos, maximo 20)</span>
+              <input type="number" id="duration" name="duration" min="1" max="20" value="5" required />
+              <small class="helper">Tempo maximo permitido: 20 segundos.</small>
             </label>
 
             <!--<label class="field hidden" id="protect-slide-wrap">
@@ -112,34 +112,6 @@
         </div>
         <p id="running-campaign" class="helper">Carregando campanha em execucao...</p>
         <iframe id="player-preview" class="player-preview" src="/player?preview=1"></iframe>
-      </section>
-
-      <section class="card settings hidden" id="transition-card">
-        <div class="card-header">
-          <h2>Efeito de Transicao Global</h2>
-        </div>
-        <div class="form transition-panel">
-          <label class="field">
-            <span>Tipo de transicao</span>
-            <select id="transition-effect-select">
-              <option value="fade">Fade</option>
-              <option value="slide-left">Slide lateral</option>
-              <option value="zoom">Zoom</option>
-              <option value="flip">Flip</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Aplicar transicao em</span>
-            <select id="transition-scope-select">
-              <option value="all">Capas e campanhas</option>
-              <option value="campaign">Somente campanhas</option>
-              <option value="cover">Somente capas</option>
-            </select>
-          </label>
-          <p class="helper">Aplicado na troca de capa, campanha e imagem no player.</p>
-          <div id="transition-preview" class="transition-preview" aria-label="Previa da transicao"></div>
-          <button class="btn primary" type="button" id="save-transition-effect-btn">Salvar configuracao</button>
-        </div>
       </section>
 
       <section class="card settings hidden" id="settings-card">
@@ -230,10 +202,6 @@
           <span>Fim</span>
           <input type="datetime-local" id="campaign-create-end" />
         </label>
-        <label class="field">
-          <span>Prioridade</span>
-          <input type="number" id="campaign-create-priority" min="1" value="1" />
-        </label>
         <div class="modal-actions">
           <button type="button" class="btn ghost" id="cancel-campaign-modal-btn">Cancelar</button>
           <button type="button" class="btn primary" id="save-campaign-modal-btn">Salvar campanha</button>
@@ -257,14 +225,7 @@
           <span>Senha</span>
           <input type="password" id="new-password" required />
         </label>
-        <label class="field" id="user-type-field" style="display: none;">
-          <span>Tipo de usuario</span>
-          <select id="new-user-type">
-            <option value="group_user">Usuario de grupo</option>
-            <option value="admin">Administrador</option>
-          </select>
-        </label>
-        <label class="field" id="user-group-field">
+        <label class="field">
           <span>Grupo</span>
           <select id="new-user-group"></select>
         </label>
@@ -295,8 +256,6 @@
     </div>
   </div>
 
-  <script src="/js/player-effects.js"></script>
-  <script src="/js/preview-effects.js"></script>
   <script>
     let currentUser = null
     let groups = []
@@ -308,8 +267,6 @@
     let autoRefreshMs = 15000
     let campaignModalMode = 'create'
     let editingCampaignId = null
-    let transitionEffect = 'fade'
-    let transitionScope = 'all'
     const GROUP_STORAGE_KEY = 'admin:selectedGroupId'
 
     const loginCard = document.getElementById('login-card')
@@ -319,7 +276,6 @@
     const usersCard = document.getElementById('users-card')
     const groupsOrderCard = document.getElementById('groups-order-card')
     const settingsCard = document.getElementById('settings-card')
-    const transitionCard = document.getElementById('transition-card')
     const sqlConsoleLink = document.getElementById('sql-console-link')
     const protectSlideWrap = document.getElementById('protect-slide-wrap')
     const protectSlideInput = document.getElementById('protect-slide')
@@ -344,17 +300,12 @@
     const campaignCreateName = document.getElementById('campaign-create-name')
     const campaignCreateStart = document.getElementById('campaign-create-start')
     const campaignCreateEnd = document.getElementById('campaign-create-end')
-    const campaignCreatePriority = document.getElementById('campaign-create-priority')
     const coverSlidesWrap = document.getElementById('cover-slides-wrap')
     const coverSlidesList = document.getElementById('cover-slides-list')
     const coverSlidesTitle = document.getElementById('cover-slides-title')
     const campaignSlidesWrap = document.getElementById('campaign-slides-wrap')
     const campaignSlidesList = document.getElementById('campaign-slides-list')
     const campaignSlidesTitle = document.getElementById('campaign-slides-title')
-    const transitionEffectSelect = document.getElementById('transition-effect-select')
-    const transitionScopeSelect = document.getElementById('transition-scope-select')
-    const transitionPreview = document.getElementById('transition-preview')
-    const saveTransitionEffectBtn = document.getElementById('save-transition-effect-btn')
 
     function getGroupQuery() {
       return selectedGroupId ? `?groupId=${selectedGroupId}` : ''
@@ -420,12 +371,10 @@
         campaignCreateName.value = campaign.name || ''
         campaignCreateStart.value = toDatetimeLocal(campaign.startsAt)
         campaignCreateEnd.value = toDatetimeLocal(campaign.endsAt)
-        campaignCreatePriority.value = Number(campaign.priority || 1)
       } else {
         campaignCreateName.value = ''
         campaignCreateStart.value = ''
         campaignCreateEnd.value = ''
-        campaignCreatePriority.value = 1
       }
 
       openModal(campaignModal)
@@ -445,45 +394,6 @@
       return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
     }
 
-    function canManageTransitionEffect() {
-      return currentUser && (currentUser.role === 'master' || currentUser.role === 'admin')
-    }
-
-    function runTransitionPreview(effect) {
-      if (!transitionPreview || !window.VisualLoopPreviewEffects) return
-      window.VisualLoopPreviewEffects.applyPreviewEffect(transitionPreview, effect)
-    }
-
-    async function loadTransitionEffectConfig() {
-      if (!canManageTransitionEffect()) return
-      const payload = await requestJson('/media/transition-effect', { cache: 'no-store' })
-      transitionEffect = String(payload?.effect || 'fade')
-      transitionScope = String(payload?.scope || 'all')
-      if (transitionEffectSelect) {
-        transitionEffectSelect.value = transitionEffect
-      }
-      if (transitionScopeSelect) {
-        transitionScopeSelect.value = transitionScope
-      }
-      runTransitionPreview(transitionEffect)
-    }
-
-    async function saveTransitionEffectConfig() {
-      if (!canManageTransitionEffect()) return
-      const selected = transitionEffectSelect ? transitionEffectSelect.value : 'fade'
-      const selectedScope = transitionScopeSelect ? transitionScopeSelect.value : 'all'
-      await requestJson('/media/transition-effect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ effect: selected, scope: selectedScope })
-      })
-      transitionEffect = selected
-      transitionScope = selectedScope
-      runTransitionPreview(transitionEffect)
-      refreshPlayerPreview()
-      alert('Configuracao de transicao salva')
-    }
-
     function renderAuth() {
       const userLabel = document.getElementById('user-label')
       if (!currentUser) {
@@ -495,7 +405,6 @@
       userLabel.textContent = `Usuario: ${currentUser.username} (${currentUser.role === 'master' ? 'master' : currentUser.groupName || 'grupo'})`
       loginCard.classList.add('hidden')
       appShell.classList.remove('hidden')
-      const canManageTransition = canManageTransitionEffect()
 
       if (currentUser.role === 'master') {
         groupSwitchWrap.classList.remove('hidden')
@@ -526,14 +435,6 @@
         if (settingsCard) settingsCard.classList.add('hidden')
         if (protectSlideWrap) protectSlideWrap.classList.add('hidden')
         if (protectSlideInput) protectSlideInput.checked = false
-      }
-
-      if (transitionCard) {
-        if (canManageTransition) {
-          transitionCard.classList.remove('hidden')
-        } else {
-          transitionCard.classList.add('hidden')
-        }
       }
 
       syncGroupHiddenFields()
@@ -591,11 +492,7 @@
 
     async function loadAllData() {
       syncGroupHiddenFields()
-      const tasks = [loadSettings(), loadCampaigns(), loadRunningCampaign()]
-      if (canManageTransitionEffect()) {
-        tasks.push(loadTransitionEffectConfig())
-      }
-      await Promise.all(tasks)
+      await Promise.all([loadSettings(), loadCampaigns(), loadRunningCampaign()])
       refreshPlayerPreview()
       if (currentUser && currentUser.role === 'master') {
         await loadRuntimeConfig()
@@ -609,9 +506,6 @@
       isAutoRefreshingAdmin = true
       try {
         const tasks = [loadCampaigns(), loadRunningCampaign()]
-        if (currentUser.role === 'master' || currentUser.role === 'admin') {
-          tasks.push(loadTransitionEffectConfig())
-        }
         if (currentUser.role === 'master') {
           tasks.push(loadRuntimeConfig())
         }
@@ -699,7 +593,13 @@
         return
       }
 
+      const reorderableCampaigns = campaigns.filter(
+        (campaign) => campaign.status === 'executando' || campaign.status === 'agendada'
+      )
+
       campaigns.forEach((campaign) => {
+        const reorderIndex = reorderableCampaigns.findIndex((item) => item.id === campaign.id)
+        const canReorder = reorderIndex >= 0
         const li = document.createElement('li')
         li.className = 'user-item'
         li.style.cursor = 'pointer'
@@ -712,12 +612,24 @@
           <span class="campaign-status ${campaign.status}">${campaign.status.toUpperCase()}</span>
           <span>${new Date(campaign.startsAt).toLocaleString('pt-BR')} - ${new Date(campaign.endsAt).toLocaleString('pt-BR')}</span>
           <div class="actions">
+            <button class="btn ghost" type="button" data-action="move-campaign-up" ${!canReorder || reorderIndex === 0 ? 'disabled' : ''}>↑</button>
+            <button class="btn ghost" type="button" data-action="move-campaign-down" ${!canReorder || reorderIndex === reorderableCampaigns.length - 1 ? 'disabled' : ''}>↓</button>
             <button class="btn ghost" type="button" data-action="edit-campaign">Editar</button>
             <button class="btn danger" type="button" data-action="delete-campaign">Excluir</button>
           </div>
         `
+        const moveUpBtn = li.querySelector('[data-action="move-campaign-up"]')
+        const moveDownBtn = li.querySelector('[data-action="move-campaign-down"]')
         const editBtn = li.querySelector('[data-action="edit-campaign"]')
         const deleteBtn = li.querySelector('[data-action="delete-campaign"]')
+        moveUpBtn.addEventListener('click', async (event) => {
+          event.stopPropagation()
+          await moveCampaign(campaign.id, -1)
+        })
+        moveDownBtn.addEventListener('click', async (event) => {
+          event.stopPropagation()
+          await moveCampaign(campaign.id, 1)
+        })
         editBtn.addEventListener('click', (event) => {
           event.stopPropagation()
           editCampaignSchedule(campaign.id)
@@ -752,6 +664,17 @@
       }
       renderCampaignList()
       loadCampaignSlides()
+    }
+
+    async function moveCampaign(campaignId, dir) {
+      await requestJson('/media/campaigns/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId, dir, groupId: selectedGroupId })
+      })
+      await loadCampaigns(campaignId)
+      await loadRunningCampaign()
+      refreshPlayerPreview()
     }
 
     function renderSlideList(listEl, slides, options = {}) {
@@ -946,7 +869,6 @@
       const name = campaignCreateName.value.trim()
       const startsAtRaw = campaignCreateStart.value
       const endsAtRaw = campaignCreateEnd.value
-      const priority = Number(campaignCreatePriority.value || 1)
 
       if (!name || !startsAtRaw || !endsAtRaw) {
         alert('Preencha nome, inicio e fim da campanha')
@@ -961,8 +883,7 @@
         groupId: selectedGroupId,
         name,
         startsAt: new Date(startsAtRaw).toISOString(),
-        endsAt: new Date(endsAtRaw).toISOString(),
-        priority
+        endsAt: new Date(endsAtRaw).toISOString()
       }
 
       if (campaignModalMode === 'edit' && Number.isInteger(editingCampaignId) && editingCampaignId > 0) {
@@ -994,7 +915,11 @@
       if (!selectedGroupId) return
       const payload = await requestJson(`/media/playlist/active${getGroupQuery()}`)
       const label = document.getElementById('running-campaign')
-      if (payload.campaign) {
+      const activeCampaigns = Array.isArray(payload.activeCampaigns) ? payload.activeCampaigns : []
+      if (activeCampaigns.length) {
+        const names = activeCampaigns.map((item) => item.name).join(', ')
+        label.textContent = `Executando: ${names} (${payload.slides.length} slides)`
+      } else if (payload.campaign) {
         label.textContent = `Executando: ${payload.campaign.name} (${payload.slides.length} slides)`
       } else {
         label.textContent = `Executando: base sem campanha (${payload.slides.length} slides)`
@@ -1020,20 +945,18 @@
     }
 
     async function loadUsers() {
-      if (!currentUser) return
+      if (!currentUser || currentUser.role !== 'master') return
       const users = await requestJson('/auth/users')
       usersList.innerHTML = ''
 
-      // Master vê todos, admin vê só group_user
-      const showAll = currentUser.role === 'master'
       users
-        .filter((item) => showAll || item.role === 'group_user')
+        .filter((item) => item.role === 'group_user')
         .forEach((item) => {
           const li = document.createElement('li')
           li.className = 'user-item'
           li.innerHTML = `
             <strong>${item.username}</strong>
-            <span>${item.role === 'admin' ? 'Administrador' : item.groupName || 'Sem grupo'}</span>
+            <span>${item.groupName || 'Sem grupo'}</span>
             <span>${Number(item.active) === 1 ? 'Ativo' : 'Inativo'}</span>
           `
           usersList.appendChild(li)
@@ -1123,7 +1046,18 @@
     function setDuration(seconds) {
       const input = document.getElementById('duration')
       if (!input) return
-      input.value = Math.max(1, Math.round(seconds))
+      input.value = Math.min(20, Math.max(1, Math.round(seconds)))
+    }
+
+    function clampUploadDurationInput() {
+      const input = document.getElementById('duration')
+      if (!input) return
+      const current = Number(input.value || 0)
+      if (!Number.isFinite(current)) {
+        input.value = '5'
+        return
+      }
+      input.value = String(Math.min(20, Math.max(1, Math.round(current))))
     }
 
     function handleMediaChange(event) {
@@ -1182,41 +1116,13 @@
 
       const username = document.getElementById('new-username').value.trim()
       const password = document.getElementById('new-password').value
-      const userType = document.getElementById('new-user-type').value
       const groupId = Number(document.getElementById('new-user-group').value)
 
-      // Validações básicas
-      if (!username) {
-        msg.textContent = 'Informe o nome do usuário'
-        return
-      }
-      if (!password) {
-        msg.textContent = 'Informe a senha'
-        return
-      }
-      if (password.length < 4) {
-        msg.textContent = 'A senha deve ter pelo menos 4 caracteres'
-        return
-      }
-      if (userType !== 'admin' && (!Number.isInteger(groupId) || groupId <= 0)) {
-        msg.textContent = 'Selecione um grupo válido'
-        return
-      }
-
-      const isAdmin = userType === 'admin'
-      const requestBody = { username, password }
-
-      if (isAdmin) {
-        requestBody.isAdmin = true
-      } else {
-        requestBody.groupId = groupId
-      }
-
       try {
-        const response = await requestJson('/auth/users', {
+        await requestJson('/auth/users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify({ username, password, groupId })
         })
         msg.textContent = 'Usuario criado com sucesso.'
         document.getElementById('create-user-form').reset()
@@ -1351,30 +1257,8 @@
     })
 
     openUserModalBtn.addEventListener('click', () => {
-      // Mostrar campo de tipo apenas para master
-      const userTypeField = document.getElementById('user-type-field')
-      const userGroupField = document.getElementById('user-group-field')
-      const userTypeSelect = document.getElementById('new-user-type')
-      const newUserGroupSelect = document.getElementById('new-user-group')
-
-      if (currentUser && currentUser.role === 'master') {
-        userTypeField.style.display = 'block'
-        userTypeSelect.value = 'group_user' // padrão
-        userGroupField.style.display = 'block'
-      } else {
-        userTypeField.style.display = 'none'
-        userGroupField.style.display = 'block'
-      }
-
       openModal(userModal)
       setTimeout(() => document.getElementById('new-username').focus(), 30)
-    })
-
-    // Controlar visibilidade do campo grupo baseado no tipo de usuário
-    document.getElementById('new-user-type').addEventListener('change', (event) => {
-      const userGroupField = document.getElementById('user-group-field')
-      const isAdmin = event.target.value === 'admin'
-      userGroupField.style.display = isAdmin ? 'none' : 'block'
     })
 
     openGroupModalBtn.addEventListener('click', () => {
@@ -1455,20 +1339,10 @@
       mediaInput.addEventListener('change', handleMediaChange)
     }
 
-    if (transitionEffectSelect) {
-      transitionEffectSelect.addEventListener('change', (event) => {
-        runTransitionPreview(event.target.value)
-      })
-    }
-
-    if (saveTransitionEffectBtn) {
-      saveTransitionEffectBtn.addEventListener('click', async () => {
-        try {
-          await saveTransitionEffectConfig()
-        } catch (error) {
-          alert(error.message || 'Falha ao salvar configuracao de transicao')
-        }
-      })
+    const durationInput = document.getElementById('duration')
+    if (durationInput) {
+      durationInput.addEventListener('input', clampUploadDurationInput)
+      durationInput.addEventListener('change', clampUploadDurationInput)
     }
 
     window.addEventListener('online', checkServerStatus)
