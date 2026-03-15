@@ -72,6 +72,16 @@ function requireMaster(req, res, next) {
   return next()
 }
 
+function requireAdminOrMaster(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Nao autenticado' })
+  }
+  if (req.user.role !== 'master' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Acesso permitido apenas para admin ou master' })
+  }
+  return next()
+}
+
 module.exports = {
   COOKIE_NAME,
   attachUser,
@@ -79,5 +89,6 @@ module.exports = {
   buildClearAuthCookie,
   parseCookies,
   requireAuth,
-  requireMaster
+  requireMaster,
+  requireAdminOrMaster
 }

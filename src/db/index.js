@@ -7,12 +7,7 @@ const { getDefaultDbPath } = require('../config/runtime-paths')
 
 const defaultDbPath = getDefaultDbPath()
 let dbPromise = null
-const TRANSITION_SETTING_KEY = 'panel_transition_effect'
-const DEFAULT_TRANSITION_EFFECT = 'fade'
-const ALLOWED_TRANSITION_EFFECTS = new Set(['fade', 'slide-left', 'zoom', 'flip'])
-const TRANSITION_SCOPE_SETTING_KEY = 'panel_transition_scope'
-const DEFAULT_TRANSITION_SCOPE = 'all'
-const ALLOWED_TRANSITION_SCOPES = new Set(['all', 'campaign', 'cover'])
+const LATEST_SCHEMA_VERSION = 6
 
 function getDbPath() {
   return process.env.DB_PATH
@@ -74,6 +69,7 @@ async function createSchema(db) {
       ends_at TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
       priority INTEGER NOT NULL DEFAULT 1,
+      is_api_automation INTEGER NOT NULL DEFAULT 0,
       created_by_user_id INTEGER NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(group_id) REFERENCES groups(id),
@@ -139,12 +135,114 @@ async function ensureCampaignsTable(db) {
       ends_at TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
       priority INTEGER NOT NULL DEFAULT 1,
+      is_api_automation INTEGER NOT NULL DEFAULT 0,
       created_by_user_id INTEGER NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(group_id) REFERENCES groups(id),
       FOREIGN KEY(created_by_user_id) REFERENCES users(id)
     );
   `)
+}
+
+async function ensureSchemaMigrationsTable(db) {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      version INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+
+  await db.run(`
+    INSERT INTO schema_migrations (id, version)
+    VALUES (1, 0)
+    ON CONFLICT(id) DO NOTHING
+  `)
+}
+
+async function getSchemaVersion(db) {
+  const row = await db.get('SELECT version FROM schema_migrations WHERE id = 1')
+  return Number(row?.version || 0)
+}
+
+async function setSchemaVersion(db, version) {
+  await db.run(
+    `
+    UPDATE schema_migrations
+    SET version = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1
+    `,
+    [version]
+  )
+}
+
+function buildBackupPath(filename, fromVersion, toVersion) {
+  const parsed = path.parse(filename)
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  return path.join(
+    parsed.dir,
+    `${parsed.name}.backup-v${fromVersion}-to-v${toVersion}-${stamp}${parsed.ext}`
+  )
+}
+
+function backupDatabaseIfNeeded(filename, fromVersion, toVersion, shouldBackup) {
+  if (!shouldBackup || !fs.existsSync(filename)) return null
+  const backupPath = buildBackupPath(filename, fromVersion, toVersion)
+  fs.copyFileSync(filename, backupPath)
+  return backupPath
+}
+
+async function ensureCampaignAutomationColumn(db) {
+  const columns = await db.all('PRAGMA table_info(campaigns)')
+  const hasAutomationFlag = columns.some((col) => col.name === 'is_api_automation')
+  if (!hasAutomationFlag) {
+    await db.exec('ALTER TABLE campaigns ADD COLUMN is_api_automation INTEGER NOT NULL DEFAULT 0')
+  }
+
+  await db.run(`
+    UPDATE campaigns
+    SET is_api_automation = 1
+    WHERE is_api_automation = 0
+      AND lower(name) LIKE 'fluxo%'
+  `)
+}
+
+async function ensureUsersAdminRoleSupport(db) {
+  const usersTable = await db.get(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+  )
+  const createSql = String(usersTable?.sql || '').toLowerCase()
+  if (!createSql) return
+  if (createSql.includes("'admin'")) return
+
+  await db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    await db.exec('BEGIN TRANSACTION')
+    await db.exec(`
+      CREATE TABLE users_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('master', 'admin', 'group_user')),
+        group_id INTEGER NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        FOREIGN KEY(group_id) REFERENCES groups(id)
+      );
+    `)
+    await db.exec(`
+      INSERT INTO users_new (id, username, password_hash, role, group_id, active)
+      SELECT id, username, password_hash, role, group_id, active
+      FROM users
+    `)
+    await db.exec('DROP TABLE users')
+    await db.exec('ALTER TABLE users_new RENAME TO users')
+    await db.exec('COMMIT')
+  } catch (error) {
+    await db.exec('ROLLBACK')
+    throw error
+  } finally {
+    await db.exec('PRAGMA foreign_keys = ON')
+  }
 }
 
 async function ensureAppSettingsTable(db) {
@@ -156,53 +254,22 @@ async function ensureAppSettingsTable(db) {
   `)
 }
 
-async function ensureTransitionEffectSetting(db) {
-  const current = await db.get('SELECT value FROM app_settings WHERE key = ?', [
-    TRANSITION_SETTING_KEY
-  ])
-  const normalized = String(current?.value || '').trim().toLowerCase()
-
-  if (ALLOWED_TRANSITION_EFFECTS.has(normalized)) return
-
-  await db.run(
-    `
-    INSERT INTO app_settings (key, value)
-    VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `,
-    [TRANSITION_SETTING_KEY, DEFAULT_TRANSITION_EFFECT]
-  )
-}
-
-async function ensureTransitionScopeSetting(db) {
-  const current = await db.get('SELECT value FROM app_settings WHERE key = ?', [
-    TRANSITION_SCOPE_SETTING_KEY
-  ])
-  const normalized = String(current?.value || '').trim().toLowerCase()
-
-  if (ALLOWED_TRANSITION_SCOPES.has(normalized)) return
-
-  await db.run(
-    `
-    INSERT INTO app_settings (key, value)
-    VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `,
-    [TRANSITION_SCOPE_SETTING_KEY, DEFAULT_TRANSITION_SCOPE]
-  )
-}
-
 async function seedGroups(db) {
   const groups = ['Operacao', 'Marketing', 'Comercial']
-  for (let index = 0; index < groups.length; index += 1) {
-    const name = groups[index]
+  for (const name of groups) {
+    const existing = await db.get('SELECT id FROM groups WHERE name = ?', [name])
+    if (existing) continue
+
+    const nextOrder = await db.get(
+      'SELECT COALESCE(MAX(display_order), 0) + 1 as nextOrder FROM groups'
+    )
+
     await db.run(
       `
       INSERT INTO groups (name, display_order)
       VALUES (?, ?)
-      ON CONFLICT(name) DO NOTHING
       `,
-      [name, index + 1]
+      [name, nextOrder.nextOrder]
     )
   }
 }
@@ -211,7 +278,7 @@ async function seedUsers(db) {
   const masterUser = process.env.MASTER_USER || 'master'
   const masterPass = process.env.MASTER_PASS || 'admin123'
   const existingMaster = await db.get(
-    'SELECT id FROM users WHERE username = ?',
+    "SELECT id FROM users WHERE username = ? OR role = 'master' ORDER BY id LIMIT 1",
     masterUser
   )
 
@@ -276,8 +343,81 @@ async function migrateJsonIfNeeded(db) {
   }
 }
 
+async function runMigrations(db, options = {}) {
+  const { filename, dbAlreadyExisted = false } = options
+  await ensureSchemaMigrationsTable(db)
+
+  const currentVersion = await getSchemaVersion(db)
+  if (currentVersion >= LATEST_SCHEMA_VERSION) {
+    return { currentVersion, backupPath: null }
+  }
+
+  const backupPath = backupDatabaseIfNeeded(
+    filename,
+    currentVersion,
+    LATEST_SCHEMA_VERSION,
+    dbAlreadyExisted
+  )
+
+  const migrations = [
+    {
+      version: 1,
+      name: 'base-schema',
+      up: async () => {
+        await createSchema(db)
+      }
+    },
+    {
+      version: 2,
+      name: 'group-order',
+      up: async () => {
+        await ensureGroupOrderColumn(db)
+      }
+    },
+    {
+      version: 3,
+      name: 'slide-protection',
+      up: async () => {
+        await ensureSlideProtectionColumns(db)
+      }
+    },
+    {
+      version: 4,
+      name: 'campaign-structure',
+      up: async () => {
+        await ensureCampaignsTable(db)
+        await ensureSlideCampaignColumn(db)
+      }
+    },
+    {
+      version: 5,
+      name: 'users-admin-role',
+      up: async () => {
+        await ensureUsersAdminRoleSupport(db)
+      }
+    },
+    {
+      version: 6,
+      name: 'campaign-automation',
+      up: async () => {
+        await ensureCampaignAutomationColumn(db)
+        await ensureAppSettingsTable(db)
+      }
+    }
+  ]
+
+  for (const migration of migrations) {
+    if (migration.version <= currentVersion) continue
+    await migration.up()
+    await setSchemaVersion(db, migration.version)
+  }
+
+  return { currentVersion, backupPath }
+}
+
 async function initializeDb() {
   const filename = getDbPath()
+  const dbAlreadyExisted = fs.existsSync(filename)
   ensureDbDirectory(filename)
 
   const db = await open({
@@ -285,17 +425,17 @@ async function initializeDb() {
     driver: sqlite3.Database
   })
 
-  await createSchema(db)
-  await ensureGroupOrderColumn(db)
-  await ensureSlideProtectionColumns(db)
-  await ensureSlideCampaignColumn(db)
-  await ensureCampaignsTable(db)
-  await ensureAppSettingsTable(db)
-  await ensureTransitionEffectSetting(db)
-  await ensureTransitionScopeSetting(db)
+  const migrationInfo = await runMigrations(db, { filename, dbAlreadyExisted })
   await seedGroups(db)
   await seedUsers(db)
   await migrateJsonIfNeeded(db)
+
+  if (migrationInfo.backupPath) {
+    console.log(`[db] Backup do banco criado em: ${migrationInfo.backupPath}`)
+  }
+  console.log(
+    `[db] Banco inicializado em ${filename} (schema v${LATEST_SCHEMA_VERSION})`
+  )
 
   return db
 }

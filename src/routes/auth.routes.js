@@ -6,7 +6,8 @@ const {
   buildAuthCookie,
   buildClearAuthCookie,
   requireAuth,
-  requireMaster
+  requireMaster,
+  requireAdminOrMaster
 } = require('../middlewares/auth.middleware')
 const {
   createSessionPayload,
@@ -28,7 +29,7 @@ function toUserDto(user) {
 async function getAllowedGroups(user) {
   const db = await getDb()
   if (!user) return []
-  if (user.role === 'master') {
+  if (user.role === 'master' || user.role === 'admin') {
     return db.all('SELECT id, name FROM groups ORDER BY display_order, name')
   }
   return db.all(
@@ -109,7 +110,7 @@ router.get('/groups', requireAuth, async (req, res, next) => {
   }
 })
 
-router.post('/groups', requireAuth, requireMaster, express.json(), async (req, res, next) => {
+router.post('/groups', requireAuth, requireAdminOrMaster, express.json(), async (req, res, next) => {
   try {
     const name = String(req.body?.name || '').trim()
     if (!name) {
@@ -151,7 +152,7 @@ router.post('/groups', requireAuth, requireMaster, express.json(), async (req, r
   }
 })
 
-router.get('/users', requireAuth, requireMaster, async (req, res, next) => {
+router.get('/users', requireAuth, requireAdminOrMaster, async (req, res, next) => {
   try {
     const db = await getDb()
     const users = await db.all(
@@ -168,24 +169,39 @@ router.get('/users', requireAuth, requireMaster, async (req, res, next) => {
   }
 })
 
-router.post('/users', requireAuth, requireMaster, express.json(), async (req, res, next) => {
+router.post('/users', requireAuth, requireAdminOrMaster, express.json(), async (req, res, next) => {
   try {
     const username = String(req.body?.username || '').trim()
     const password = String(req.body?.password || '')
-    const groupId = Number(req.body?.groupId)
+    const groupId = req.body?.groupId !== undefined ? Number(req.body?.groupId) : null
     const active = req.body?.active === false ? 0 : 1
+    const isAdmin = req.body?.isAdmin === true
 
-    if (!username || !password || !Number.isInteger(groupId) || groupId <= 0) {
-      return res.status(400).json({ error: 'Informe usuario, senha e grupo validos' })
+    // Apenas master pode criar usuários admin
+    if (isAdmin && req.user.role !== 'master') {
+      return res.status(403).json({ error: 'Apenas master pode criar usuarios admin' })
+    }
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Informe usuario e senha' })
     }
     if (password.length < 4) {
       return res.status(400).json({ error: 'Senha deve ter pelo menos 4 caracteres' })
     }
 
+    // Se não for admin, grupo é obrigatório
+    if (!isAdmin && (groupId === null || !Number.isInteger(groupId) || groupId <= 0)) {
+      return res.status(400).json({ error: 'Usuarios de grupo precisam de um grupo valido' })
+    }
+
     const db = await getDb()
-    const group = await db.get('SELECT id FROM groups WHERE id = ?', [groupId])
-    if (!group) {
-      return res.status(404).json({ error: 'Grupo nao encontrado' })
+
+    // Se não for admin, validar que o grupo existe
+    if (!isAdmin) {
+      const group = await db.get('SELECT id FROM groups WHERE id = ?', [groupId])
+      if (!group) {
+        return res.status(404).json({ error: 'Grupo nao encontrado' })
+      }
     }
 
     const existing = await db.get('SELECT id FROM users WHERE username = ?', [username])
@@ -193,12 +209,15 @@ router.post('/users', requireAuth, requireMaster, express.json(), async (req, re
       return res.status(409).json({ error: 'Usuario ja existe' })
     }
 
+    // Define o role baseado no parâmetro isAdmin
+    const role = isAdmin ? 'admin' : 'group_user'
+
     const result = await db.run(
       `
       INSERT INTO users (username, password_hash, role, group_id, active)
-      VALUES (?, ?, 'group_user', ?, ?)
+      VALUES (?, ?, ?, ?, ?)
       `,
-      [username, hashPassword(password), groupId, active]
+      [username, hashPassword(password), role, groupId, active]
     )
 
     const created = await db.get(

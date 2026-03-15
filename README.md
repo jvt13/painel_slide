@@ -1,66 +1,51 @@
-﻿# Painel Slide (VisualLoop)
+# Painel Slide
 
-Sistema de gerenciamento de midia para painel de slides com grupos, campanhas e controle de acesso.
+Sistema de painel de midias com campanhas, capas por grupo, upload de imagens e player web.
 
-## Funcionalidades
+## Banco SQLite
 
-- Upload e gerenciamento de campanhas por grupo
-- Controle de usuarios com papeis `master`, `admin` e `group_user`
-- Ordenacao de grupos no player
-- Preview do player no painel admin
-- Efeito de transicao global no player:
-  - `fade`
-  - `slide-left`
-  - `zoom`
-  - `flip`
-- Escopo da transicao configuravel:
-  - `all` (capas e campanhas)
-  - `campaign` (somente campanhas)
-  - `cover` (somente capas)
+O sistema usa SQLite e foi ajustado para funcionar bem em atualizacoes via `.exe`.
 
-## Instalacao
+Comportamento atual:
 
-1. Instale dependencias:
-```bash
-npm install
-```
+- se o banco **nao existir**, ele e criado automaticamente
+- se o banco **ja existir**, os dados atuais **nao sao apagados**
+- se a versao nova precisar de colunas, tabelas ou ajustes de estrutura, o sistema aplica **migracoes incrementais**
+- antes de migrar um banco ja existente, o sistema cria um **backup automatico** no mesmo diretorio do banco
 
-2. Inicie o servidor:
-```bash
-npm start
-```
+Arquivos importantes:
 
-3. Acesse:
-- Admin: `http://localhost:3000/admin`
-- Player: `http://localhost:3000/player`
+- banco padrao: `src/data/painel.sqlite`
+- backups automaticos: `src/data/painel.backup-vX-to-vY-*.sqlite`
 
-## Usuarios
+## Atualizando em outro computador
 
-### Tipos
+Para levar uma nova versao do `.exe` para outra maquina:
 
-- `master`: acesso total, incluindo console SQL
-- `admin`: gestao administrativa sem console SQL
-- `group_user`: acesso restrito ao proprio grupo
+1. copie apenas o executavel novo
+2. mantenha a pasta `src/data` da maquina destino
+3. ao iniciar, o sistema detecta o banco existente e adapta somente a estrutura necessaria
+4. os dados ja cadastrados continuam no banco da maquina
 
-### Usuario padrao
+Em outras palavras: **nao e necessario enviar um banco novo para atualizar o sistema**.
 
-- Usuario: `master`
-- Senha: `admin123`
+## Migracoes automaticas
 
-## Configuracao de transicao
+O controle de versao do schema fica no proprio banco, na tabela:
 
-No painel admin (master/admin), use a secao **Efeito de Transicao Global** para:
+- `schema_migrations`
 
-1. Escolher o efeito
-2. Escolher o escopo de aplicacao
-3. Visualizar o preview
-4. Salvar
+O sistema hoje aplica migracoes para:
 
-A configuracao e global e aplicada automaticamente no player, sem alterar a duracao individual dos slides.
+- criacao da estrutura base
+- ordenacao de grupos
+- protecao e autoria de slides
+- relacao de slides com campanhas
+- compatibilidade de usuarios com papel `admin`
+- identificacao de campanhas da automacao da API
 
-## Desenvolvimento
+## Observacoes
 
-Para ambiente de desenvolvimento:
-```bash
-npm run dev
-```
+- campanhas criadas pela rota da API de automacao ficam marcadas como automacao
+- campanhas antigas com nome iniciando em `fluxo` tambem sao reconhecidas como automacao
+- o banco continua podendo ser definido por `DB_PATH`, se necessario

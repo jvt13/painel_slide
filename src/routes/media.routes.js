@@ -9,6 +9,9 @@ const { getUploadsDir } = require('../config/runtime-paths')
 
 const router = express.Router()
 const uploadsPath = getUploadsDir()
+function isAdminOrMaster(user) {
+  return user && (user.role === 'master' || user.role === 'admin')
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -71,7 +74,7 @@ async function resolveGroupId(req, options = {}) {
     .trim()
     .toLowerCase()
 
-  if (user && user.role !== 'master') {
+  if (user && !isAdminOrMaster(user)) {
     if (queryGroupId && queryGroupId !== user.group_id) {
       const error = new Error('Acesso negado para este grupo')
       error.status = 403
@@ -168,6 +171,10 @@ function getCampaignSortBucket(status) {
   return isCampaignReorderableStatus(status) ? 0 : 1
 }
 
+function isApiAutomationCampaign(row) {
+  return Number(row.is_api_automation || row.isApiAutomation || 0) === 1
+}
+
 function sortCampaignRowsForDisplay(rows) {
   return [...rows].sort((left, right) => {
     const leftStatus = getCampaignStatus(left.starts_at || left.startsAt, left.ends_at || left.endsAt, Number(left.active) === 1)
@@ -177,6 +184,10 @@ function sortCampaignRowsForDisplay(rows) {
     if (bucketDiff !== 0) return bucketDiff
 
     if (bucketDiff === 0 && getCampaignSortBucket(leftStatus) === 0) {
+      const automationDiff =
+        Number(isApiAutomationCampaign(right)) - Number(isApiAutomationCampaign(left))
+      if (automationDiff !== 0) return automationDiff
+
       const leftPriority = Number(left.priority || 1)
       const rightPriority = Number(right.priority || 1)
       if (leftPriority !== rightPriority) return leftPriority - rightPriority
@@ -193,7 +204,7 @@ function sortCampaignRowsForDisplay(rows) {
 async function resolveActiveCampaigns(db, groupId) {
   const campaigns = await db.all(
     `
-    SELECT id, name, starts_at, ends_at, active, priority
+    SELECT id, name, starts_at, ends_at, active, priority, is_api_automation
     FROM campaigns
     WHERE group_id = ?
     `,
@@ -305,7 +316,7 @@ router.get('/public/playlist/active', async (req, res, next) => {
 
 router.get('/groups', async (req, res, next) => {
   try {
-    if (req.user && req.user.role !== 'master') {
+    if (req.user && !isAdminOrMaster(req.user)) {
       const groups = await getDb().then((db) =>
         db.all(
           'SELECT id, name, display_order as displayOrder FROM groups WHERE id = ? ORDER BY display_order, name',
@@ -383,7 +394,7 @@ router.get('/campaigns', requireAuth, async (req, res, next) => {
     const db = await getDb()
     const campaigns = await db.all(
       `
-      SELECT id, group_id as groupId, name, starts_at as startsAt, ends_at as endsAt, active, priority
+      SELECT id, group_id as groupId, name, starts_at as startsAt, ends_at as endsAt, active, priority, is_api_automation as isApiAutomation
       FROM campaigns
       WHERE group_id = ?
       `,
@@ -395,6 +406,7 @@ router.get('/campaigns', requireAuth, async (req, res, next) => {
       sorted.map((item) => ({
         ...item,
         active: Number(item.active) === 1,
+        isApiAutomation: Number(item.isApiAutomation) === 1,
         status: getCampaignStatus(item.startsAt, item.endsAt, Number(item.active) === 1)
       }))
     )
@@ -415,7 +427,7 @@ router.post('/campaigns/reorder', requireAuth, express.json(), async (req, res, 
     const db = await getDb()
     const campaigns = await db.all(
       `
-      SELECT id, starts_at, ends_at, active, priority
+      SELECT id, starts_at, ends_at, active, priority, is_api_automation
       FROM campaigns
       WHERE group_id = ?
       `,
@@ -423,12 +435,13 @@ router.post('/campaigns/reorder', requireAuth, express.json(), async (req, res, 
     )
 
     const reorderable = sortCampaignRowsForDisplay(campaigns).filter((item) =>
-      isCampaignReorderableStatus(getCampaignStatus(item.starts_at, item.ends_at, Number(item.active) === 1))
+      isCampaignReorderableStatus(getCampaignStatus(item.starts_at, item.ends_at, Number(item.active) === 1)) &&
+      !isApiAutomationCampaign(item)
     )
 
     const index = reorderable.findIndex((item) => item.id === campaignId)
     if (index < 0) {
-      return res.status(400).json({ error: 'Somente campanhas executando ou agendadas podem ser reordenadas' })
+      return res.status(400).json({ error: 'Campanhas da automacao ficam fixas no topo e nao podem ser reordenadas' })
     }
 
     const nextIndex = index + dir
@@ -650,10 +663,10 @@ router.post('/campaigns/slides/update', requireAuth, express.json(), async (req,
     if (!slide) {
       return res.status(404).json({ error: 'Slide nao encontrado' })
     }
-    if (req.user.role !== 'master' && !slide.campaign_id) {
+    if (!isAdminOrMaster(req.user) && !slide.campaign_id) {
       return res.status(403).json({ error: 'Somente master pode editar capas do grupo' })
     }
-    if (req.user.role !== 'master' && Number(slide.is_locked) === 1) {
+    if (!isAdminOrMaster(req.user) && Number(slide.is_locked) === 1) {
       return res.status(403).json({
         error: 'Slide protegido pelo master nao pode ser alterado'
       })
@@ -689,10 +702,10 @@ router.post('/campaigns/slides/delete', requireAuth, express.json(), async (req,
     if (!slide) {
       return res.status(404).json({ error: 'Slide nao encontrado' })
     }
-    if (req.user.role !== 'master' && !slide.campaign_id) {
+    if (!isAdminOrMaster(req.user) && !slide.campaign_id) {
       return res.status(403).json({ error: 'Somente master pode excluir capas do grupo' })
     }
-    if (req.user.role !== 'master' && Number(slide.is_locked) === 1) {
+    if (!isAdminOrMaster(req.user) && Number(slide.is_locked) === 1) {
       return res.status(403).json({
         error: 'Slide protegido pelo master nao pode ser excluido'
       })
@@ -756,7 +769,7 @@ router.post('/campaigns/slides/reorder', requireAuth, express.json(), async (req
     if (!current) {
       return res.status(404).json({ error: 'Slide nao encontrado' })
     }
-    if (req.user.role !== 'master' && !current.campaign_id) {
+    if (!isAdminOrMaster(req.user) && !current.campaign_id) {
       return res.status(403).json({ error: 'Somente master pode ordenar capas do grupo' })
     }
 
@@ -780,7 +793,7 @@ router.post('/campaigns/slides/reorder', requireAuth, express.json(), async (req
 
     const target = scopeRows[nextIndex]
     if (
-      req.user.role !== 'master' &&
+      !isAdminOrMaster(req.user) &&
       (Number(current.is_locked) === 1 || Number(target.is_locked) === 1)
     ) {
       return res.status(403).json({
@@ -837,7 +850,7 @@ router.post(
       const duration = normalizeUploadDurationMs(req.body?.duration, 5)
       const inputName = String(req.body?.name || '').trim()
       const shouldLock =
-        req.user.role === 'master' &&
+        isAdminOrMaster(req.user) &&
         (req.body?.protectSlide === '1' || req.body?.protectSlide === 'true')
       // campanha existente identificada por nome fornecido
       const campaignName = String(req.body?.campaignName || '').trim()
@@ -869,8 +882,8 @@ router.post(
         // cria nova campanha com período calculado
         const created = await db.run(
           `
-          INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, created_by_user_id)
-          VALUES (?, ?, ?, ?, 1, 1, ?)
+          INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, is_api_automation, created_by_user_id)
+          VALUES (?, ?, ?, ?, 1, 1, 1, ?)
           `,
           [groupId, campaignName, startsAt, endsAt, req.user.id]
         )
@@ -878,7 +891,7 @@ router.post(
       }
 
       const isBaseUpload = !campaignId
-      const lockAsCover = req.user.role === 'master' && isBaseUpload ? true : shouldLock
+      const lockAsCover = isAdminOrMaster(req.user) && isBaseUpload ? true : shouldLock
       let insertPosition = 0
 
       if (isBaseUpload && lockAsCover) {
@@ -944,7 +957,7 @@ router.post(
       const duration = normalizeUploadDurationMs(req.body?.duration, 5)
       const inputName = String(req.body?.name || '').trim()
       const shouldLock =
-        req.user.role === 'master' &&
+        isAdminOrMaster(req.user) &&
         (req.body?.protectSlide === '1' || req.body?.protectSlide === 'true')
       const incomingCampaignId = req.body?.campaignId
         ? String(req.body.campaignId).trim()
@@ -986,14 +999,14 @@ router.post(
         campaignId = created.lastID
       }
 
-      if (req.user.role !== 'master' && !campaignId) {
+      if (!isAdminOrMaster(req.user) && !campaignId) {
         return res.status(400).json({
           error: 'Usuario de grupo deve selecionar ou criar uma campanha'
         })
       }
 
       const isBaseUpload = !campaignId
-      const lockAsCover = req.user.role === 'master' && isBaseUpload ? true : shouldLock
+      const lockAsCover = isAdminOrMaster(req.user) && isBaseUpload ? true : shouldLock
       let insertPosition = 0
 
       if (isBaseUpload && lockAsCover) {
@@ -1164,10 +1177,10 @@ router.post('/upload', requireAuth, upload.single('media'), async (req, res, nex
     const duration = normalizeUploadDurationMs(req.body?.duration, 5)
     const campaignId = req.body?.campaignId ? Number(req.body.campaignId) : null
     const shouldLock =
-      req.user.role === 'master' &&
+      isAdminOrMaster(req.user) &&
       (req.body?.protectSlide === '1' || req.body?.protectSlide === 'true')
 
-    if (req.user.role !== 'master' && !campaignId) {
+    if (!isAdminOrMaster(req.user) && !campaignId) {
       return res.status(400).json({
         error: 'Selecione ou crie uma campanha antes de enviar a midia'
       })
@@ -1254,7 +1267,7 @@ router.post('/reorder', requireAuth, express.json(), async (req, res, next) => {
     const target = slides[newIndex]
     if (!current || !target) return res.sendStatus(400)
     if (
-      req.user.role !== 'master' &&
+      !isAdminOrMaster(req.user) &&
       (Number(current.is_locked) === 1 ||
         Number(target.is_locked) === 1 ||
         current.campaign_id == null ||
@@ -1307,7 +1320,7 @@ router.post('/delete', requireAuth, express.json(), async (req, res, next) => {
     const item = slides[index]
     if (!item) return res.sendStatus(400)
     if (
-      req.user.role !== 'master' &&
+      !isAdminOrMaster(req.user) &&
       (Number(item.is_locked) === 1 || item.campaign_id == null)
     ) {
       return res.status(403).json({

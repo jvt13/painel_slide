@@ -84,7 +84,7 @@
               </span>
             </label>-->
 
-            <button class="btn primary" type="submit">Enviar imagem</button>
+            <button class="btn primary" type="submit">Enviar</button>
           </form>
         </section>
 
@@ -167,17 +167,16 @@
             </div>
             <ul id="groups-list" class="users-list"></ul>
           </section>
+          <section class="management-panel" id="groups-order-card">
+            <div class="panel-header">
+              <h3>Ordem dos Grupos</h3>
+              <button class="btn ghost" type="button" onclick="loadGroupOrder()">Atualizar</button>
+            </div>
+            <ul id="groups-order-list" class="users-list"></ul>
+            <button class="btn primary" type="button" onclick="saveGroupOrder()">Salvar ordem</button>
+          </section>
         </div>
         <p class="helper" id="create-user-msg"></p>
-      </section>
-
-      <section class="card settings hidden" id="groups-order-card">
-        <div class="card-header">
-          <h2>Ordem dos Grupos no Player</h2>
-          <button class="btn ghost" type="button" onclick="loadGroupOrder()">Atualizar</button>
-        </div>
-        <ul id="groups-order-list" class="users-list"></ul>
-        <button class="btn primary" type="button" onclick="saveGroupOrder()">Salvar ordem</button>
       </section>
 
     </div>
@@ -307,6 +306,10 @@
     const campaignSlidesList = document.getElementById('campaign-slides-list')
     const campaignSlidesTitle = document.getElementById('campaign-slides-title')
 
+    function isAdminOrMasterUser() {
+      return currentUser && (currentUser.role === 'master' || currentUser.role === 'admin')
+    }
+
     function getGroupQuery() {
       return selectedGroupId ? `?groupId=${selectedGroupId}` : ''
     }
@@ -402,15 +405,24 @@
         return
       }
 
-      userLabel.textContent = `Usuario: ${currentUser.username} (${currentUser.role === 'master' ? 'master' : currentUser.groupName || 'grupo'})`
+      const roleLabel = currentUser.role === 'master'
+        ? 'master'
+        : currentUser.role === 'admin'
+        ? 'admin'
+        : currentUser.groupName || 'grupo'
+      userLabel.textContent = `Usuario: ${currentUser.username} (${roleLabel})`
       loginCard.classList.add('hidden')
       appShell.classList.remove('hidden')
 
-      if (currentUser.role === 'master') {
+      if (isAdminOrMasterUser()) {
         groupSwitchWrap.classList.remove('hidden')
         usersCard.classList.remove('hidden')
         groupsOrderCard.classList.remove('hidden')
-        sqlConsoleLink.classList.remove('hidden')
+        if (currentUser.role === 'master') {
+          sqlConsoleLink.classList.remove('hidden')
+        } else {
+          sqlConsoleLink.classList.add('hidden')
+        }
         if (settingsCard) settingsCard.classList.add('hidden')
         if (protectSlideWrap) protectSlideWrap.classList.remove('hidden')
         groupSelect.innerHTML = ''
@@ -475,7 +487,7 @@
 
         currentUser = me.user
         groups = me.groups || []
-        if (currentUser.role === 'master') {
+        if (isAdminOrMasterUser()) {
           selectedGroupId = groups[0] ? groups[0].id : null
         } else {
           selectedGroupId = currentUser.groupId
@@ -494,7 +506,7 @@
       syncGroupHiddenFields()
       await Promise.all([loadSettings(), loadCampaigns(), loadRunningCampaign()])
       refreshPlayerPreview()
-      if (currentUser && currentUser.role === 'master') {
+      if (isAdminOrMasterUser()) {
         await loadRuntimeConfig()
         await refreshUsersAndGroups()
         await loadGroupOrder()
@@ -506,7 +518,7 @@
       isAutoRefreshingAdmin = true
       try {
         const tasks = [loadCampaigns(), loadRunningCampaign()]
-        if (currentUser.role === 'master') {
+        if (isAdminOrMasterUser()) {
           tasks.push(loadRuntimeConfig())
         }
         await Promise.all(tasks)
@@ -541,7 +553,7 @@
 
     function renderCampaignOptions(preferredCampaignId = null) {
       const previous = campaignSelect.value
-      const isMaster = currentUser && currentUser.role === 'master'
+      const isMaster = isAdminOrMasterUser()
       campaignSelect.innerHTML = ''
 
       if (isMaster) {
@@ -594,26 +606,28 @@
       }
 
       const reorderableCampaigns = campaigns.filter(
-        (campaign) => campaign.status === 'executando' || campaign.status === 'agendada'
+        (campaign) =>
+          (campaign.status === 'executando' || campaign.status === 'agendada') &&
+          !campaign.isApiAutomation
       )
 
       campaigns.forEach((campaign) => {
         const reorderIndex = reorderableCampaigns.findIndex((item) => item.id === campaign.id)
         const canReorder = reorderIndex >= 0
         const li = document.createElement('li')
-        li.className = 'user-item'
+        li.className = 'user-item campaign-item'
         li.style.cursor = 'pointer'
         li.addEventListener('click', () => selectCampaignForView(campaign.id))
         if (selectedCampaignViewId === campaign.id) {
           li.classList.add('selected')
         }
         li.innerHTML = `
-          <strong>${campaign.name}</strong>
+          <strong class="campaign-name">${campaign.name}${campaign.isApiAutomation ? '<span class="automation-tag">AUTOMACAO</span>' : ''}</strong>
           <span class="campaign-status ${campaign.status}">${campaign.status.toUpperCase()}</span>
-          <span>${new Date(campaign.startsAt).toLocaleString('pt-BR')} - ${new Date(campaign.endsAt).toLocaleString('pt-BR')}</span>
+          <span class="campaign-range">${new Date(campaign.startsAt).toLocaleString('pt-BR')} - ${new Date(campaign.endsAt).toLocaleString('pt-BR')}</span>
           <div class="actions">
-            <button class="btn ghost" type="button" data-action="move-campaign-up" ${!canReorder || reorderIndex === 0 ? 'disabled' : ''}>↑</button>
-            <button class="btn ghost" type="button" data-action="move-campaign-down" ${!canReorder || reorderIndex === reorderableCampaigns.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="btn ghost" type="button" data-action="move-campaign-up" ${!canReorder || reorderIndex === 0 ? 'disabled' : ''} title="${campaign.isApiAutomation ? 'Campanha da automacao fica fixa no topo' : 'Mover para cima'}">↑</button>
+            <button class="btn ghost" type="button" data-action="move-campaign-down" ${!canReorder || reorderIndex === reorderableCampaigns.length - 1 ? 'disabled' : ''} title="${campaign.isApiAutomation ? 'Campanha da automacao fica fixa no topo' : 'Mover para baixo'}">↓</button>
             <button class="btn ghost" type="button" data-action="edit-campaign">Editar</button>
             <button class="btn danger" type="button" data-action="delete-campaign">Excluir</button>
           </div>
@@ -727,7 +741,7 @@
     }
 
     function renderCoverSlides(slides) {
-      const isMaster = currentUser && currentUser.role === 'master'
+      const isMaster = isAdminOrMasterUser()
       coverSlidesWrap.classList.remove('hidden')
       coverSlidesTitle.textContent = isMaster
         ? 'Capas do grupo (somente master)'
@@ -945,34 +959,35 @@
     }
 
     async function loadUsers() {
-      if (!currentUser || currentUser.role !== 'master') return
+      if (!isAdminOrMasterUser()) return
       const users = await requestJson('/auth/users')
       usersList.innerHTML = ''
 
+      const showAll = currentUser.role === 'master' || currentUser.role === 'admin'
       users
-        .filter((item) => item.role === 'group_user')
+        .filter((item) => showAll || item.role === 'group_user')
         .forEach((item) => {
           const li = document.createElement('li')
-          li.className = 'user-item'
+          li.className = 'user-item users-row'
           li.innerHTML = `
-            <strong>${item.username}</strong>
-            <span>${item.groupName || 'Sem grupo'}</span>
-            <span>${Number(item.active) === 1 ? 'Ativo' : 'Inativo'}</span>
+            <strong class="row-primary">${item.username}</strong>
+            <span class="row-secondary">${item.role === 'admin' ? 'Administrador' : item.groupName || 'Sem grupo'}</span>
+            <span class="row-tertiary">${Number(item.active) === 1 ? 'Ativo' : 'Inativo'}</span>
           `
           usersList.appendChild(li)
         })
     }
 
     async function loadGroupsList() {
-      if (!currentUser || currentUser.role !== 'master') return
+      if (!isAdminOrMasterUser()) return
       const list = await requestJson('/media/groups')
       groupsList.innerHTML = ''
       list.forEach((group) => {
         const li = document.createElement('li')
-        li.className = 'user-item'
+        li.className = 'user-item groups-row'
         li.innerHTML = `
-          <strong>${group.name}</strong>
-          <span>Ordem #${group.displayOrder || '-'}</span>
+          <strong class="row-primary">${group.name}</strong>
+          <span class="row-secondary">Ordem #${group.displayOrder || '-'}</span>
         `
         groupsList.appendChild(li)
       })
@@ -984,10 +999,10 @@
 
       groupOrder.forEach((group, index) => {
         const li = document.createElement('li')
-        li.className = 'user-item'
+        li.className = 'user-item groups-order-row'
         li.innerHTML = `
-          <strong>${group.name}</strong>
-          <span>#${index + 1}</span>
+          <strong class="row-primary">${group.name}</strong>
+          <span class="row-secondary">#${index + 1}</span>
           <div class="actions">
             <button class="btn ghost" onclick="moveGroup(${index}, -1)">↑</button>
             <button class="btn ghost" onclick="moveGroup(${index}, 1)">↓</button>
@@ -998,7 +1013,7 @@
     }
 
     async function loadGroupOrder() {
-      if (!currentUser || currentUser.role !== 'master') return
+      if (!isAdminOrMasterUser()) return
       const list = await requestJson('/media/groups')
       groups = list
       groupOrder = [...list]
@@ -1084,7 +1099,7 @@
 
         currentUser = payload.user
         groups = payload.groups || []
-        if (currentUser.role === 'master') {
+        if (isAdminOrMasterUser()) {
           selectedGroupId = groups[0] ? groups[0].id : null
         } else {
           selectedGroupId = currentUser.groupId
@@ -1168,7 +1183,7 @@
         return
       }
 
-      const isMaster = currentUser && currentUser.role === 'master'
+      const isMaster = isAdminOrMasterUser()
       const selectedCampaign = campaignSelect.value
       const selectedCampaignId = Number(selectedCampaign)
       const fileInput = document.getElementById('media-file')
