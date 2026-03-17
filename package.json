@@ -12,7 +12,7 @@
     "dev": "scripts\\dev.bat",
     "build:exe:ico": "node scripts/generate-ico.js",
     "build:exe:patch": "node scripts/patch-sqlite-binding.js",
-    "build:exe:raw": "pkg . --targets node18-win-x64 --out-path dist",
+    "build:exe:raw": "pkg . --targets node18-win-x64 --out-path dist --no-bytecode --icon src/public/assets/icon_256x256.ico",
     "build:exe:native": "node scripts/copy-sqlite-binary.js",
     "build:exe:iconfile": "node scripts/copy-app-icon.js",
     "build:exe:shortcut-script": "node scripts/copy-shortcut-script.js",
@@ -20,7 +20,7 @@
     "build:exe:force-f11-assets": "node scripts/copy-force-f11-assets.js",
     "build:exe:icon": "node scripts/set-exe-icon.js",
     "build:exe": "npm run build:exe:patch && npm run build:exe:raw && npm run build:exe:native && npm run build:exe:iconfile && npm run build:exe:shortcut-script && npm run build:exe:kiosk-script && npm run build:exe:force-f11-assets",
-    "build:exe:with-icon": "npm run build:exe && npm run build:exe:ico && npm run build:exe:icon",
+    "build:exe:with-icon": "npm run build:exe",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "José",

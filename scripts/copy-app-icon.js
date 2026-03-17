@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 
 function main() {
-  const source = path.resolve(__dirname, '..', 'src', 'public', 'assets', 'system-logo.ico')
+  const source = path.resolve(__dirname, '..', 'src', 'public', 'assets', 'icon_256x256.ico')
   const target = path.resolve(__dirname, '..', 'dist', 'painel_slide.ico')
 
   if (!fs.existsSync(source)) {
