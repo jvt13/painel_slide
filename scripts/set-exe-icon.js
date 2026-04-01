@@ -3,7 +3,7 @@ const path = require('path')
 
 async function main() {
   const exePath = path.resolve(__dirname, '..', 'dist', 'VisualLoop.exe')
-  const iconPath = path.resolve(__dirname, '..', 'src', 'public', 'assets', 'icon_256x256.ico')
+  const iconPath = path.resolve(__dirname, '..', 'src', 'public', 'assets', 'system-logo.ico')
 
   if (!fs.existsSync(exePath)) {
     throw new Error(`Executavel nao encontrado: ${exePath}`)

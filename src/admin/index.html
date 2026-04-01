@@ -72,9 +72,9 @@
             </label>
 
             <label class="field">
-              <span>Duracao de cada imagem (segundos, maximo 20)</span>
-              <input type="number" id="duration" name="duration" min="1" max="20" value="5" required />
-              <small class="helper">Tempo maximo permitido: 20 segundos.</small>
+              <span>Duracao de cada imagem (segundos, maximo 30)</span>
+              <input type="number" id="duration" name="duration" min="1" max="30" value="5" required />
+              <small class="helper">Tempo maximo permitido: 30 segundos.</small>
             </label>
 
             <!--<label class="field hidden" id="protect-slide-wrap">
@@ -725,7 +725,7 @@
               <span class="kind">${String(slide.type || 'midia').toUpperCase()}</span>
               <label class="slide-duration-edit">
                 <span>Duracao (s)</span>
-                <input type="number" min="1" id="slide-duration-${slide.id}" value="${durationSeconds}" ${readonly ? 'disabled' : ''} />
+                <input type="number" min="1" max="30" id="slide-duration-${slide.id}" value="${durationSeconds}" ${readonly ? 'disabled' : ''} />
               </label>
             </div>
           </div>
@@ -804,7 +804,8 @@
 
     async function updateSlide(slideId) {
       const input = document.getElementById(`slide-duration-${slideId}`)
-      const duration = Number(input?.value || 0)
+      const duration = Math.min(30, Math.max(1, Number(input?.value || 0)))
+      if (input) input.value = String(duration)
       if (!Number.isFinite(duration) || duration <= 0) {
         alert('Informe uma duracao valida em segundos')
         return
@@ -1061,7 +1062,7 @@
     function setDuration(seconds) {
       const input = document.getElementById('duration')
       if (!input) return
-      input.value = Math.min(20, Math.max(1, Math.round(seconds)))
+      input.value = Math.min(30, Math.max(1, Math.round(seconds)))
     }
 
     function clampUploadDurationInput() {
@@ -1072,7 +1073,7 @@
         input.value = '5'
         return
       }
-      input.value = String(Math.min(20, Math.max(1, Math.round(current))))
+      input.value = String(Math.min(30, Math.max(1, Math.round(current))))
     }
 
     function handleMediaChange(event) {

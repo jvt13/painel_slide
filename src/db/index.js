@@ -9,6 +9,14 @@ const defaultDbPath = getDefaultDbPath()
 let dbPromise = null
 const LATEST_SCHEMA_VERSION = 6
 
+function normalizeGroupSeedName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
 function getDbPath() {
   return process.env.DB_PATH
     ? path.resolve(process.cwd(), process.env.DB_PATH)
@@ -257,7 +265,11 @@ async function ensureAppSettingsTable(db) {
 async function seedGroups(db) {
   const groups = ['Operacao', 'Marketing', 'Comercial']
   for (const name of groups) {
-    const existing = await db.get('SELECT id FROM groups WHERE name = ?', [name])
+    const existingRows = await db.all('SELECT id, name FROM groups')
+    const targetKey = normalizeGroupSeedName(name)
+    const existing = existingRows.find(
+      (group) => normalizeGroupSeedName(group.name) === targetKey
+    )
     if (existing) continue
 
     const nextOrder = await db.get(
@@ -299,7 +311,10 @@ async function migrateJsonIfNeeded(db) {
 
   const playlistFile = path.resolve(__dirname, '..', 'data', 'playlist.json')
   const settingsFile = path.resolve(__dirname, '..', 'data', 'settings.json')
-  const operacao = await db.get('SELECT id FROM groups WHERE name = ?', 'Operacao')
+  const groups = await db.all('SELECT id, name FROM groups ORDER BY id')
+  const operacao = groups.find(
+    (group) => normalizeGroupSeedName(group.name) === normalizeGroupSeedName('Operacao')
+  )
   if (!operacao) return
 
   if (fs.existsSync(settingsFile)) {

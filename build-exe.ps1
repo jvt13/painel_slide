@@ -10,7 +10,7 @@ $localCacheV34Dir = Join-Path $localCacheDir 'v3.4'
 $localFetched = Join-Path $localCacheV34Dir 'fetched-v18.5.0-win-x64'
 $globalFetched = Join-Path $env:USERPROFILE '.pkg-cache\v3.4\fetched-v18.5.0-win-x64'
 $exePath = Join-Path $projectRoot 'dist\VisualLoop.exe'
-$iconPath = Join-Path $projectRoot 'src\public\assets\icon_256x256.ico'
+$iconPath = Join-Path $projectRoot 'src\public\assets\system-logo.ico'
 
 if (!(Test-Path $localCacheV34Dir)) {
   New-Item -ItemType Directory -Path $localCacheV34Dir -Force | Out-Null

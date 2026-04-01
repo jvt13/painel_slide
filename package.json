@@ -12,7 +12,7 @@
     "dev": "scripts\\dev.bat",
     "build:exe:ico": "node scripts/generate-ico.js",
     "build:exe:patch": "node scripts/patch-sqlite-binding.js",
-    "build:exe:raw": "pkg . --targets node18-win-x64 --out-path dist --no-bytecode --icon src/public/assets/icon_256x256.ico",
+    "build:exe:raw": "pkg . --targets node18-win-x64 --out-path dist --no-bytecode --icon src/public/assets/system-logo.ico",
     "build:exe:native": "node scripts/copy-sqlite-binary.js",
     "build:exe:iconfile": "node scripts/copy-app-icon.js",
     "build:exe:shortcut-script": "node scripts/copy-shortcut-script.js",

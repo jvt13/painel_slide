@@ -558,7 +558,7 @@ textarea {
 
 #campaign-list .campaign-item {
   display: grid;
-  grid-template-columns: minmax(110px, 150px) 78px minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(170px, 240px) 92px minmax(180px, 1fr) auto;
   align-items: center;
   padding: 5px 8px;
   min-height: 42px;

@@ -26,7 +26,19 @@ const storage = multer.diskStorage({
 })
 
 const upload = multer({ storage })
-const MAX_SLIDE_DURATION_SECONDS = 20
+const MAX_SLIDE_DURATION_SECONDS = 30
+
+const campaignUploadFields = upload.fields([
+  { name: 'mediaFile', maxCount: 1 },
+  { name: 'file', maxCount: 1 }
+])
+
+function getUploadedCampaignFile(req) {
+  if (req.file) return req.file
+  if (req.files?.mediaFile?.[0]) return req.files.mediaFile[0]
+  if (req.files?.file?.[0]) return req.files.file[0]
+  return null
+}
 
 function normalizeUploadDurationMs(rawValue, fallbackSeconds = 5) {
   const parsed = Number(rawValue)
@@ -50,6 +62,106 @@ function calculateCycleTimes(receivedStartsAt) {
 
   return { startsAt, endsAt };
 }
+
+
+function parseCampaignDateTime(rawValue) {
+  const raw = String(rawValue || '').trim()
+  if (!raw) return null
+
+  if (/^\d+$/.test(raw)) {
+    const timestamp = Number(raw)
+    if (Number.isFinite(timestamp)) {
+      const fromTimestamp = new Date(timestamp)
+      if (!Number.isNaN(fromTimestamp.getTime())) return fromTimestamp.toISOString()
+    }
+  }
+
+  if (/([zZ]|[+\-]\d{2}:\d{2})$/.test(raw)) {
+    const directDate = new Date(raw)
+    if (!Number.isNaN(directDate.getTime())) return directDate.toISOString()
+  }
+
+  const isoLocal = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/)
+  if (isoLocal) {
+    const [, year, month, day, hour = '0', minute = '0', second = '0'] = isoLocal
+    const localDate = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second))
+    if (!Number.isNaN(localDate.getTime())) return localDate.toISOString()
+  }
+
+  const brLocal = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/)
+  if (brLocal) {
+    const [, day, month, year, hour = '0', minute = '0', second = '0'] = brLocal
+    const localDate = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second))
+    if (!Number.isNaN(localDate.getTime())) return localDate.toISOString()
+  }
+
+  const fallback = new Date(raw)
+  if (!Number.isNaN(fallback.getTime())) return fallback.toISOString()
+  return null
+}
+
+function resolveApiCampaignTimes(body) {
+  const rawStartsAt = String(body?.startsAt || '').trim()
+  const rawEndsAt = String(body?.endsAt || '').trim()
+
+  if (rawStartsAt && rawEndsAt) {
+    const startsAt = parseCampaignDateTime(rawStartsAt)
+    const endsAt = parseCampaignDateTime(rawEndsAt)
+
+    if (!startsAt || !endsAt) {
+      const error = new Error('Datas da campanha invalidas')
+      error.status = 400
+      throw error
+    }
+
+    if (new Date(startsAt).getTime() >= new Date(endsAt).getTime()) {
+      const error = new Error('Data/hora de fim deve ser maior que a de inicio')
+      error.status = 400
+      throw error
+    }
+
+    return { startsAt, endsAt, source: 'explicit-range' }
+  }
+
+  if (rawStartsAt) {
+    const normalizedStartsAt = parseCampaignDateTime(rawStartsAt)
+    if (!normalizedStartsAt) {
+      const error = new Error('Data/hora de inicio invalida')
+      error.status = 400
+      throw error
+    }
+
+    return { ...calculateCycleTimes(normalizedStartsAt), source: 'cycle-fallback' }
+  }
+
+  return { ...calculateCycleTimes(new Date().toISOString()), source: 'cycle-fallback' }
+}
+
+function resolveUploadFilePath(src) {
+  if (!src || !String(src).startsWith('/uploads/')) return null
+  return path.resolve(__dirname, '..', String(src).replace('/uploads', 'uploads'))
+}
+
+async function deleteCampaignSlidesWithFiles(db, groupId, campaignId) {
+  const slides = await db.all(
+    `
+    SELECT id, src
+    FROM slides
+    WHERE group_id = ? AND campaign_id = ?
+    `,
+    [groupId, campaignId]
+  )
+
+  for (const slide of slides) {
+    const filePath = resolveUploadFilePath(slide.src)
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath)
+    }
+  }
+
+  await db.run('DELETE FROM slides WHERE group_id = ? AND campaign_id = ?', [groupId, campaignId])
+}
+
 
 async function listAllGroups() {
   const db = await getDb()
@@ -672,7 +784,7 @@ router.post('/campaigns/slides/update', requireAuth, express.json(), async (req,
       })
     }
 
-    const duration = Math.max(1000, Math.round(durationSeconds * 1000))
+    const duration = normalizeUploadDurationMs(durationSeconds, 5)
     await db.run('UPDATE slides SET duration = ? WHERE id = ?', [duration, slideId])
 
     await emitGroupUpdate(req, 'playlist:update', groupId)
@@ -827,7 +939,7 @@ router.post('/campaigns/slides/reorder', requireAuth, express.json(), async (req
 // - retorna JSON semelhante ao endpoint /campaigns/upload
 router.post(
   '/api/campaigns/upload',
-  upload.single('mediaFile'),
+  campaignUploadFields,
   async (req, res, next) => {
     try {
       const apiKey = req.get('x-api-key') || req.body?.apiKey || ''
@@ -838,7 +950,7 @@ router.post(
       req.user = { role: 'master', id: null }
 
       const groupId = await resolveGroupId(req)
-      const file = req.file
+      const file = getUploadedCampaignFile(req)
       if (!file) {
         return res.status(400).json({ error: 'Selecione uma imagem' })
       }
@@ -857,19 +969,7 @@ router.post(
       if (!campaignName) {
         return res.status(400).json({ error: 'Nome da campanha e obrigatorio' })
       }
-
-      // Calcular datas baseado no startsAt fornecido
-      const receivedStartsAt = String(req.body?.startsAt || '').trim();
-      let startsAt, endsAt;
-      if (receivedStartsAt) {
-        ({ startsAt, endsAt } = calculateCycleTimes(receivedStartsAt));
-      } else {
-        // Usar data/hora atual local e calcular o ciclo da hora atual
-        const now = new Date();
-        ({ startsAt, endsAt } = calculateCycleTimes(now.toISOString()));
-      }
-
-      //console.log('Datas da campanha:', { startsAt, endsAt });
+      const { startsAt, endsAt } = resolveApiCampaignTimes(req.body)
 
       let campaignId = null
       const existingCampaign = await db.get(
@@ -878,8 +978,16 @@ router.post(
       )
       if (existingCampaign) {
         campaignId = existingCampaign.id
+        await deleteCampaignSlidesWithFiles(db, groupId, campaignId)
+        await db.run(
+          `
+          UPDATE campaigns
+          SET starts_at = ?, ends_at = ?, active = 1, is_api_automation = 1
+          WHERE id = ? AND group_id = ?
+          `,
+          [startsAt, endsAt, campaignId, groupId]
+        )
       } else {
-        // cria nova campanha com período calculado
         const created = await db.run(
           `
           INSERT INTO campaigns (group_id, name, starts_at, ends_at, active, priority, is_api_automation, created_by_user_id)
@@ -941,11 +1049,11 @@ router.post(
 router.post(
   '/campaigns/upload',
   requireAuth,
-  upload.single('mediaFile'),
+  campaignUploadFields,
   async (req, res, next) => {
     try {
       const groupId = await resolveGroupId(req, { forWrite: true })
-      const file = req.file
+      const file = getUploadedCampaignFile(req)
       if (!file) {
         return res.status(400).json({ error: 'Selecione uma imagem' })
       }
